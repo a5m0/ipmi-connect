@@ -92,10 +92,11 @@ func (m *MediaRoots) Resolve(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("cannot open %s", filepath.Base(path))
 	}
-	if !m.allowed(real) {
+	contained, ok := m.contain(real)
+	if !ok {
 		return "", errOutsideRoots
 	}
-	return real, nil
+	return contained, nil
 }
 
 // ResolveNew returns the real path for a file to be created, if its folder is allowed and its
@@ -106,6 +107,9 @@ func (m *MediaRoots) ResolveNew(path string) (string, error) {
 	}
 	path = filepath.Clean(path)
 	name := filepath.Base(path)
+	if !filepath.IsLocal(name) {
+		return "", errors.New("give a file name")
+	}
 	if strings.HasPrefix(name, ".") {
 		return "", errors.New("the file name must not start with a dot")
 	}
@@ -120,30 +124,40 @@ func (m *MediaRoots) ResolveNew(path string) (string, error) {
 	return full, nil
 }
 
-// allowed reports whether a resolved path is an explicitly picked file or lies, without hidden
-// components, within a root.
-func (m *MediaRoots) allowed(real string) bool {
+// contain checks a resolved path against the roots and returns it rebuilt from trusted parts:
+// a picked file is returned as the copy stored when it was picked, and a path inside a root as
+// that root joined with a local relative path (no "..", not absolute, nothing hidden). Callers
+// open what contain returns, never the path they were given.
+func (m *MediaRoots) contain(real string) (string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.files[real] {
-		return true
+	for picked := range m.files {
+		if picked == real {
+			return picked, true
+		}
 	}
 	for _, r := range m.roots {
 		rel, err := filepath.Rel(r, real)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		if err != nil {
 			continue
 		}
 		if rel == "." {
-			return true
+			return r, true
 		}
-		hidden := false
-		for _, part := range strings.Split(rel, string(filepath.Separator)) {
-			if strings.HasPrefix(part, ".") {
-				hidden = true
-				break
-			}
+		if !filepath.IsLocal(rel) {
+			continue // outside the root
 		}
-		if !hidden {
+		if hasHiddenComponent(rel) {
+			continue
+		}
+		return filepath.Join(r, rel), true
+	}
+	return "", false
+}
+
+func hasHiddenComponent(rel string) bool {
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if strings.HasPrefix(part, ".") {
 			return true
 		}
 	}
@@ -194,8 +208,12 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		full := filepath.Join(real, d.Name())
-		target, err := filepath.EvalSymlinks(full)
-		if err != nil || !roots.allowed(target) {
+		resolved, err := filepath.EvalSymlinks(full)
+		if err != nil {
+			continue
+		}
+		target, ok := roots.contain(resolved)
+		if !ok {
 			continue // a link out of the roots
 		}
 		info, err := os.Stat(target)

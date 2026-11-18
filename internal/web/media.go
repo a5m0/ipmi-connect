@@ -110,7 +110,7 @@ func (s *Server) mediaRoutes(mux *http.ServeMux) {
 				return err
 			}
 		} else {
-			log.Printf("[Server] Creating a blank %d-byte image", req.Size)
+			log.Printf("[Server] Creating a blank image")
 			if err := diskimage.CreateBlank(path, req.Size, req.Label); err != nil {
 				return err
 			}
