@@ -5,3 +5,7 @@
 
 .DS_Store
 .claude/worktrees/
+flatpak-dist/
+build-dir/
+.flatpak-builder/
+vendor/

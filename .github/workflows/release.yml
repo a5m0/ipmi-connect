@@ -1,57 +1,115 @@
 name: Release
 
+# Manual only: a release (and anything published) needs someone to start this workflow. With
+# dry_run (the default) everything is built, checked and attested as a workflow artifact, but no
+# tag, GitHub release or changelog commit is made. Nothing is ever published to Flathub.
 on:
-  workflow_run:
-    workflows: ["CI"]
-    branches:
-      - main
-    types:
-      - completed
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build everything but publish nothing
+        type: boolean
+        default: true
 
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: release
   cancel-in-progress: false
 
+env:
+  GOTOOLCHAIN: local
+  SEMANTIC_RELEASE_PACKAGES: >-
+    semantic-release@24.2.3
+    @semantic-release/changelog@6.0.3
+    @semantic-release/git@10.0.1
+    @semantic-release/exec@6.0.3
+    @semantic-release/github@11.0.1
+    conventional-changelog-conventionalcommits@8.0.0
+
 jobs:
-  release:
-    name: Semantic Release
+  version:
+    name: Next version
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success') }}
+    permissions:
+      contents: write # semantic-release checks push access even in a dry run
+    outputs:
+      version: ${{ steps.next.outputs.version }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-          cache: true
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-
-      - name: Install semantic-release dependencies
-        run: |
-          npm install --no-save \
-            semantic-release@^24.2.3 \
-            @semantic-release/changelog@^6.0.3 \
-            @semantic-release/git@^10.0.1 \
-            @semantic-release/exec@^6.0.3 \
-            @semantic-release/github@^11.0.1 \
-            conventional-changelog-conventionalcommits@^8.0.0
-
-      - name: Run semantic-release
+      - run: npm install --no-save --ignore-scripts $SEMANTIC_RELEASE_PACKAGES
+      - id: next
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx semantic-release
+        run: |
+          out=$(npx semantic-release --dry-run --no-ci 2>&1 || true)
+          echo "$out" | tail -20
+          v=$(echo "$out" | sed -n 's/.*The next release version is \([0-9][0-9A-Za-z.+-]*\).*/\1/p' | head -1)
+          if [ -z "$v" ]; then echo "No release is due (no feat/fix commits since the last tag)."; exit 1; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+  flatpak:
+    name: Flatpak
+    needs: version
+    uses: ./.github/workflows/flatpak.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  release:
+    name: Build, attest and (unless dry run) publish
+    needs: [version, flatpak]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # tag, GitHub release, changelog commit
+      issues: write       # semantic-release comments on released issues
+      pull-requests: write
+      id-token: write     # Sigstore keyless signing for attestations
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: ${{ !inputs.dry_run }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: false # a release builds from a clean cache
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: flatpak-*
+          path: flatpak-dist
+          merge-multiple: true
+      - name: Tests
+        run: go test -race -count=1 ./...
+      - name: Build (dry run)
+        if: inputs.dry_run
+        run: ./scripts/build-release.sh "${{ needs.version.outputs.version }}"
+      - name: Publish with semantic-release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm install --no-save --ignore-scripts $SEMANTIC_RELEASE_PACKAGES
+          npx semantic-release
+      - name: Check the release was built for the expected version
+        run: ls dist/*_${{ needs.version.outputs.version }}_* >/dev/null
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/sha256sums.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ needs.version.outputs.version }}
+          path: dist/
+          if-no-files-found: error
