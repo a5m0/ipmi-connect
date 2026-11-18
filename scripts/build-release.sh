@@ -41,12 +41,26 @@ for target in "${TARGETS[@]}"; do
     -o "$TMP_BUILD/ipmi-connect" \
     "$REPO_ROOT/cmd/ipmi-connect"
 
+  files=(ipmi-connect)
+  # Linux archives also carry the native-window build (Wails; GTK4 and WebKitGTK 6.0 are loaded
+  # at run time, so it still needs no cgo). The browser build stays for CLI use and machines
+  # without those libraries.
+  if [[ "$os" == "linux" ]]; then
+    CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
+      -trimpath \
+      -tags desktop,purego,production \
+      -ldflags="-s -w -X main.version=${VERSION}" \
+      -o "$TMP_BUILD/ipmi-connect-desktop" \
+      "$REPO_ROOT/cmd/ipmi-connect"
+    files+=(ipmi-connect-desktop)
+  fi
+
   cp "$REPO_ROOT/LICENSE" "$TMP_BUILD/"
   cp "$REPO_ROOT/NOTICE" "$TMP_BUILD/"
   cp "$REPO_ROOT/README.md" "$TMP_BUILD/"
 
   ARCHIVE_NAME="ipmi-connect_${VERSION}_${os}_${arch}.tar.gz"
-  tar -czf "$DIST_DIR/$ARCHIVE_NAME" -C "$TMP_BUILD" ipmi-connect LICENSE NOTICE README.md
+  tar -czf "$DIST_DIR/$ARCHIVE_NAME" -C "$TMP_BUILD" "${files[@]}" LICENSE NOTICE README.md
   rm -rf "$TMP_BUILD"
   echo "    Created $ARCHIVE_NAME"
 done
@@ -65,6 +79,9 @@ fi
 echo "==> Generating the SBOM (CycloneDX)..."
 (cd "$REPO_ROOT" && go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0 \
   app -json -licenses -main cmd/ipmi-connect -output "$DIST_DIR/ipmi-connect_${VERSION}.cdx.json")
+# The desktop build links Wails and its dependencies, so it gets its own SBOM.
+(cd "$REPO_ROOT" && GOFLAGS="-tags=desktop,purego,production" go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0 \
+  app -json -licenses -main cmd/ipmi-connect -output "$DIST_DIR/ipmi-connect-desktop_${VERSION}.cdx.json")
 
 echo "==> Generating sha256sums.txt..."
 (
