@@ -4,7 +4,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/bmc"
 )
 
 // keyMacro is a chord: keys are pressed in order, held, then released in reverse order.

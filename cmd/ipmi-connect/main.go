@@ -22,12 +22,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
-	"github.com/mhamzahkhan/ipmi-connect/internal/config"
-	"github.com/mhamzahkhan/ipmi-connect/internal/portal"
-	"github.com/mhamzahkhan/ipmi-connect/internal/session"
-	"github.com/mhamzahkhan/ipmi-connect/internal/trust"
-	"github.com/mhamzahkhan/ipmi-connect/internal/web"
+	"github.com/a5m0/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/config"
+	"github.com/a5m0/ipmi-connect/internal/portal"
+	"github.com/a5m0/ipmi-connect/internal/session"
+	"github.com/a5m0/ipmi-connect/internal/trust"
+	"github.com/a5m0/ipmi-connect/internal/web"
 )
 
 var version = "dev"

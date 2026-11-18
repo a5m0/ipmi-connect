@@ -1,4 +1,4 @@
-module github.com/mhamzahkhan/ipmi-connect
+module github.com/a5m0/ipmi-connect
 
 go 1.27.2
 

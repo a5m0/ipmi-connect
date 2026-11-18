@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/avmp"
-	"github.com/mhamzahkhan/ipmi-connect/internal/vmedia"
+	"github.com/a5m0/ipmi-connect/internal/avmp"
+	"github.com/a5m0/ipmi-connect/internal/vmedia"
 )
 
 const (

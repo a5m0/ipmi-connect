@@ -5,8 +5,8 @@ import (
 	"crypto/x509"
 	"testing"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
-	"github.com/mhamzahkhan/ipmi-connect/internal/trust"
+	"github.com/a5m0/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/trust"
 )
 
 // testEndpoint reaches addr with cert pinned (nil: nothing pinned) and the unencrypted KVM and

@@ -12,7 +12,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/bmc"
 )
 
 // testPort is the port test servers pretend to be bound to; requests must name it in Host.

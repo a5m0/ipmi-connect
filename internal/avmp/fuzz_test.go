@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/vmedia"
+	"github.com/a5m0/ipmi-connect/internal/vmedia"
 )
 
 // fuzzImageSize keeps fuzzed drives small: 16 CD sectors or 64 disk blocks.

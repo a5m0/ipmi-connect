@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
-	"github.com/mhamzahkhan/ipmi-connect/internal/diskimage"
+	"github.com/a5m0/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/diskimage"
 )
 
 // pickTimeout bounds how long the native file chooser may stay open.

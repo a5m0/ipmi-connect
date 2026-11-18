@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/atenvm"
-	"github.com/mhamzahkhan/ipmi-connect/internal/vmedia"
+	"github.com/a5m0/ipmi-connect/internal/atenvm"
+	"github.com/a5m0/ipmi-connect/internal/vmedia"
 )
 
 const defaultVMediaPort = 623

@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/aspeed"
-	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
-	"github.com/mhamzahkhan/ipmi-connect/internal/dell"
-	"github.com/mhamzahkhan/ipmi-connect/internal/trust"
+	"github.com/a5m0/ipmi-connect/internal/aspeed"
+	"github.com/a5m0/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/dell"
+	"github.com/a5m0/ipmi-connect/internal/trust"
 )
 
 const (

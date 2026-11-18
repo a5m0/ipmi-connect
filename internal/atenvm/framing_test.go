@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/atenvm"
+	"github.com/a5m0/ipmi-connect/internal/atenvm"
 )
 
 func TestHeaderEncodeDecode(t *testing.T) {

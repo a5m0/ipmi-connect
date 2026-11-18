@@ -8,9 +8,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/config"
-	"github.com/mhamzahkhan/ipmi-connect/internal/session"
-	"github.com/mhamzahkhan/ipmi-connect/internal/trust"
+	"github.com/a5m0/ipmi-connect/internal/config"
+	"github.com/a5m0/ipmi-connect/internal/session"
+	"github.com/a5m0/ipmi-connect/internal/trust"
 )
 
 // Sessions is what the server needs from the session manager.
