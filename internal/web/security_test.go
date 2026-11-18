@@ -120,7 +120,7 @@ func TestLogoutInvalidatesTokenTicketsAndSockets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 	if _, _, err := conn.Read(ctx); err != nil { // resize
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestWebSocketTicketsAreSingleUseAndExpire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn.CloseNow()
+	_ = conn.CloseNow()
 	if _, resp, err := websocket.Dial(ctx, url+"?ticket="+ticket, nil); err == nil || resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("reused ticket accepted (%v)", err)
 	}

@@ -434,7 +434,9 @@ func (m *Manager) probe(ctx context.Context, ep *bmc.Endpoint, vendor *Vendor) (
 			log.Printf("[Session] Probing %s's %s channels: %v (checked again when they connect)", ep.Host, vendor.Name, err)
 		}
 		for _, r := range extra {
-			if !slices.ContainsFunc(out.tls, func(x trust.ProbeResult) bool { return x.Cert.Fingerprint == r.Cert.Fingerprint && x.Legacy == r.Legacy }) {
+			if !slices.ContainsFunc(out.tls, func(x trust.ProbeResult) bool {
+				return x.Cert.Fingerprint == r.Cert.Fingerprint && x.Legacy == r.Legacy
+			}) {
 				out.tls = append(out.tls, r)
 			}
 		}

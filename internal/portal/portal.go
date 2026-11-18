@@ -41,7 +41,7 @@ func Available(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	var owner string
 	err = conn.BusObject().CallWithContext(ctx, "org.freedesktop.DBus.GetNameOwner", 0, busName).Store(&owner)
 	if err == nil {
@@ -65,7 +65,7 @@ func OpenURI(ctx context.Context, uri string) error {
 	if err != nil {
 		return fmt.Errorf("session bus: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_, err = request(ctx, conn, "org.freedesktop.portal.OpenURI.OpenURI", false, "", uri, map[string]dbus.Variant{})
 	return err
 }
@@ -77,7 +77,7 @@ func PickFiles(ctx context.Context, title string, directory bool) ([]string, err
 	if err != nil {
 		return nil, fmt.Errorf("session bus: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	opts := map[string]dbus.Variant{
 		"modal":    dbus.MakeVariant(true),
 		"multiple": dbus.MakeVariant(false),

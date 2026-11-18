@@ -113,7 +113,9 @@ func TestConnectControlOverPinnedTLS(t *testing.T) {
 	}
 }
 
-func parseLeaf(c tls.Certificate) (*x509.Certificate, error) { return x509.ParseCertificate(c.Certificate[0]) }
+func parseLeaf(c tls.Certificate) (*x509.Certificate, error) {
+	return x509.ParseCertificate(c.Certificate[0])
+}
 
 func TestPlainAPCPNeedsConsent(t *testing.T) {
 	host, port := fakeAPCP(t, func(conn net.Conn) {

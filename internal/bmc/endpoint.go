@@ -95,7 +95,8 @@ func validHostname(h string) bool {
 			return false
 		}
 		for _, c := range label {
-			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			alnum := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+			if !alnum && c != '-' && c != '_' {
 				return false
 			}
 		}

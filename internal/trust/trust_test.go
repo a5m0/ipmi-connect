@@ -78,7 +78,7 @@ func tlsServer(t *testing.T, cfg *tls.Config) (addr string, gotData chan []byte)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 	gotData = make(chan []byte, 16)
 	go func() {
 		for {
@@ -115,7 +115,7 @@ func roundTrip(t *testing.T, p *Policy, addr, serverName string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_, err = conn.Write([]byte("hello"))
 	return err
 }

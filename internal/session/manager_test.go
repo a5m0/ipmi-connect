@@ -389,7 +389,7 @@ func TestInputValidation(t *testing.T) {
 
 func TestRequestNeverPrintsPassword(t *testing.T) {
 	r := Request{Address: "192.0.2.1", User: "root", Password: "hunter2"}
-	for _, s := range []string{fmt.Sprint(r), fmt.Sprintf("%v", r), fmt.Sprintf("%+v", r), fmt.Sprintf("%#v", r), fmt.Sprintf("%s", r)} {
+	for _, s := range []string{fmt.Sprint(r), fmt.Sprintf("%v", r), fmt.Sprintf("%+v", r), fmt.Sprintf("%#v", r), fmt.Sprintf("%s", r)} { //nolint:staticcheck // each verb on purpose
 		if strings.Contains(s, "hunter2") {
 			t.Errorf("formatted request leaks the password: %s", s)
 		}

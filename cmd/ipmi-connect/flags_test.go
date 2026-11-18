@@ -56,7 +56,7 @@ func TestParseArgs(t *testing.T) {
 			}),
 		},
 		{"media dirs", []string{"--media-dir", "/isos", "--media-dir=/more"}, with(func(o *options) { o.MediaDirs = []string{"/isos", "/more"} })},
-		{"idle timeout", []string{"--idle-timeout", "5m"}, with(func(o *options) { o.IdleTimeout, o.IdleSet = 5 * time.Minute, true })},
+		{"idle timeout", []string{"--idle-timeout", "5m"}, with(func(o *options) { o.IdleTimeout, o.IdleSet = 5*time.Minute, true })},
 		{"idle timeout off", []string{"--idle-timeout=0"}, with(func(o *options) { o.IdleSet = true })},
 		{"bad idle timeout ignored", []string{"--idle-timeout", "soon"}, defaults},
 		{"web port 0 asks the OS", []string{"--web-port", "0"}, with(func(o *options) { o.WebPort, o.WebPortSet = 0, true })},
