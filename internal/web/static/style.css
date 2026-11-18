@@ -1030,3 +1030,6 @@ canvas {
 .cert-table { border-collapse: collapse; font-size: 12px; width: 100%; }
 .cert-table th { text-align: left; color: var(--text-muted); font-weight: 500; padding: 3px 10px 3px 0; white-space: nowrap; vertical-align: top; }
 .cert-table td { padding: 3px 0; word-break: break-all; }
+
+/* Explanatory text under a table in a dialog. */
+.media-table + .modal-description { margin-top: 14px; }

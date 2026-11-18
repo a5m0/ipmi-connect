@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/signal"
@@ -18,7 +19,32 @@ import (
 	"github.com/mhamzahkhan/ipmi-connect/internal/web"
 )
 
-const fakeFingerprint = "AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89"
+// The values the scripted BMC presents. The defaults probe the UI's escaping of server text;
+// FAKEAPP_DOCS=1 swaps in plain, realistic placeholders for documentation screenshots.
+var (
+	fakeFingerprint = "AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89"
+	fakeSubject     = "CN=<b>bmc</b>"
+	fakeInsecure    = []string{"KVM: plain RFB <script>alert(1)</script>"}
+	docsMode        = false
+	fakeNotBefore   = time.Now().Add(-time.Hour)
+	fakeNotAfter    = time.Now().Add(time.Hour)
+	fakeVersion     = "e2e"
+)
+
+func useDocsValues() {
+	docsMode = true
+	sum := sha256.Sum256([]byte("ipmi-connect documentation screenshot"))
+	fakeFingerprint = trust.FormatFingerprint(sum[:])
+	fakeSubject = "CN=192.0.2.10, O=ATEN, C=TW"
+	// Old BMCs ship long-lived self-signed certificates generated at manufacture.
+	fakeNotBefore = time.Date(2014, 1, 2, 0, 0, 0, 0, time.UTC)
+	fakeNotAfter = time.Date(2034, 1, 1, 0, 0, 0, 0, time.UTC)
+	fakeVersion = "0.3.0"
+	fakeInsecure = []string{
+		"KVM: plain RFB, so the screen and every keystroke cross the network unencrypted",
+		"Virtual media: RC4 under a key published in the vendor's client, so disk data is effectively unencrypted",
+	}
+}
 
 type console struct {
 	mu   sync.Mutex
@@ -52,7 +78,8 @@ func (s *sessions) Status() session.Status {
 		st.Host, st.Vendor = "192.0.2.10", "supermicro"
 		st.Channels = []bmc.ChannelSecurity{
 			{Channel: "Web interface", Encryption: bmc.EncLegacyTLS, Protocol: "TLS 1.0", Cipher: "TLS_RSA_WITH_AES_256_CBC_SHA", Auth: bmc.AuthPinned, Fingerprint: fakeFingerprint},
-			{Channel: "KVM", Encryption: bmc.EncNone, Auth: bmc.AuthNone, Note: "plain RFB"},
+			{Channel: "KVM", Encryption: bmc.EncNone, Auth: bmc.AuthNone, Note: "plain RFB: screen and keystrokes are unencrypted"},
+			{Channel: "Virtual media", Encryption: bmc.EncWeak, Auth: bmc.AuthNone, Note: "RC4 under a publicly known key: effectively unencrypted"},
 		}
 		st.SecurityLevel = bmc.SecurityLevelOf(st.Channels)
 	}
@@ -69,11 +96,11 @@ func (s *sessions) Connect(ctx context.Context, req session.Request) (session.St
 			Certificates: []session.CertDecision{{
 				Endpoint: "https", Status: "unknown", Protocol: "TLS 1.0", Cipher: "TLS_RSA_WITH_AES_256_CBC_SHA",
 				Reason: "it is not signed by a trusted certificate authority (self-signed?)",
-				Cert: trust.CertInfo{Fingerprint: fakeFingerprint, Subject: "CN=<b>bmc</b>", Issuer: "CN=<b>bmc</b>", Key: "RSA 1024",
-					NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)},
+				Cert: trust.CertInfo{Fingerprint: fakeFingerprint, Subject: fakeSubject, Issuer: fakeSubject, Key: "RSA 1024",
+					NotBefore: fakeNotBefore, NotAfter: fakeNotAfter},
 			}},
 			LegacyTLS:        []string{"https (TLS 1.0, TLS_RSA_WITH_AES_256_CBC_SHA)"},
-			InsecureChannels: []string{"KVM: plain RFB <script>alert(1)</script>"},
+			InsecureChannels: fakeInsecure,
 		}
 	}
 	if !strings.EqualFold(req.TrustFingerprints[0], fakeFingerprint) || req.Password != "test-password" {
@@ -91,6 +118,9 @@ func (s *sessions) Connect(ctx context.Context, req session.Request) (session.St
 		for n := 0; ; n++ {
 			for i := 0; i < len(pix); i += 4 {
 				pix[i], pix[i+1], pix[i+2], pix[i+3] = 200, byte(n), 40, 255
+				if docsMode { // a dark screen, like a host at a text console
+					pix[i], pix[i+1], pix[i+2] = 18, 18, 18
+				}
 			}
 			s.server.UpdateScreen(w, h, pix)
 			select {
@@ -115,8 +145,11 @@ func (s *sessions) Disconnect() {
 }
 
 func main() {
+	if os.Getenv("FAKEAPP_DOCS") == "1" {
+		useDocsValues()
+	}
 	srv := web.NewServer(0, bmc.SessionState{PowerState: bmc.PowerStateUnknown})
-	srv.Version = "e2e"
+	srv.Version = fakeVersion
 	srv.Desktop = true
 	srv.Trust = trust.NewMemoryStore()
 	srv.Profiles = config.NewMemoryStore()
