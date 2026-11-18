@@ -1,15 +1,15 @@
 [
   {
     "type": "archive",
-    "url": "https://proxy.golang.org/github.com/anchore/go-lzo/@v/v0.1.0.zip",
-    "sha256": "74e5636203039daeb2339a7953b653d39a1d15c23856e74135e6c5f9fe749216",
+    "url": "https://proxy.golang.org/github.com/anchore/go-lzo/@v/v0.1.1.zip",
+    "sha256": "75cbab209e61945e91335de0a8ef98ba91f5ac27c47fa4fb385e5c5f9747848f",
     "dest": "vendor/github.com/anchore/go-lzo",
     "strip-components": 3
   },
   {
     "type": "archive",
-    "url": "https://proxy.golang.org/github.com/coder/websocket/@v/v1.8.14.zip",
-    "sha256": "b729277821461eb21a816c16e29a02029dd6abbb1a43b526c1e0a6b794942de0",
+    "url": "https://proxy.golang.org/github.com/coder/websocket/@v/v1.8.15.zip",
+    "sha256": "4f1d890bc5131f335737bbb6241e3958758c8774b3e6d1c905f713f604af6209",
     "dest": "vendor/github.com/coder/websocket",
     "strip-components": 3
   },
@@ -29,8 +29,8 @@
   },
   {
     "type": "archive",
-    "url": "https://proxy.golang.org/github.com/ebitengine/purego/@v/v0.11.1.zip",
-    "sha256": "f314003767757fd3c150029496aedbae2592b2d85b0e76db0f907f77f0170f26",
+    "url": "https://proxy.golang.org/github.com/ebitengine/purego/@v/v0.11.3.zip",
+    "sha256": "794b433246c662b29a0b48f2f07b1814bfe15ca61744de88f05d18d7795f77c2",
     "dest": "vendor/github.com/ebitengine/purego",
     "strip-components": 3
   },
@@ -64,15 +64,15 @@
   },
   {
     "type": "archive",
-    "url": "https://proxy.golang.org/github.com/klauspost/compress/@v/v1.20.2.zip",
-    "sha256": "f85b4729a966a3d0313310482a11b585f0be445a20b2ea0c967937fe14c17acc",
+    "url": "https://proxy.golang.org/github.com/klauspost/compress/@v/v1.20.4.zip",
+    "sha256": "680860caaacbb74f2010f32e4eb81f14cdc597e8a4633c7316946ab7cca5895a",
     "dest": "vendor/github.com/klauspost/compress",
     "strip-components": 3
   },
   {
     "type": "archive",
-    "url": "https://proxy.golang.org/github.com/pierrec/lz4/v4/@v/v4.1.26.zip",
-    "sha256": "cf67f99d8d4ed84775a51de3167b70907e5436dd2f501f37deffac46c0a51ae1",
+    "url": "https://proxy.golang.org/github.com/pierrec/lz4/v4/@v/v4.1.33.zip",
+    "sha256": "b848476e729bbdf587a80940fa84b45680a63052e6c021201baa38ee61275686",
     "dest": "vendor/github.com/pierrec/lz4/v4",
     "strip-components": 4
   },
@@ -85,15 +85,15 @@
   },
   {
     "type": "archive",
-    "url": "https://proxy.golang.org/github.com/sirupsen/logrus/@v/v1.9.4.zip",
-    "sha256": "3847d00c5ee6948f1ff0d0120bc343c55ce852becb7720f8f08f53eecfe9e437",
+    "url": "https://proxy.golang.org/github.com/sirupsen/logrus/@v/v1.10.2.zip",
+    "sha256": "73a40737da86682dd536ec2c87dff0f589eeeed81873362b08ed009818747b52",
     "dest": "vendor/github.com/sirupsen/logrus",
     "strip-components": 3
   },
   {
     "type": "archive",
-    "url": "https://proxy.golang.org/github.com/ulikunitz/xz/@v/v0.5.15.zip",
-    "sha256": "ca1830f9abc6c99a003ad28f2b145ea0af0c99d5769ddff08d23ce055959fd12",
+    "url": "https://proxy.golang.org/github.com/ulikunitz/xz/@v/v0.5.17.zip",
+    "sha256": "14fd36aba2f4bae6ed85e8b8b2269f3fe5743dc3b6e3d73a3ef7469f20d5cc5e",
     "dest": "vendor/github.com/ulikunitz/xz",
     "strip-components": 3
   },
@@ -106,21 +106,21 @@
   },
   {
     "type": "archive",
-    "url": "https://proxy.golang.org/golang.org/x/sys/@v/v0.49.0.zip",
-    "sha256": "e73a06591ca0d7016ce3ccb45c36a8ed7128468aecc1a357f94d815c760c6b31",
+    "url": "https://proxy.golang.org/golang.org/x/sys/@v/v0.50.0.zip",
+    "sha256": "b115e8a144a7c9d1df3ffb8af20b283e162844b5b624a97ee342955cca69b9e6",
     "dest": "vendor/golang.org/x/sys",
     "strip-components": 3
   },
   {
     "type": "archive",
-    "url": "https://proxy.golang.org/golang.org/x/term/@v/v0.47.0.zip",
-    "sha256": "d990d5ab94dfa41ba980645b721bba7490064337a01bb03e6cacace70e8df0bf",
+    "url": "https://proxy.golang.org/golang.org/x/term/@v/v0.48.0.zip",
+    "sha256": "3f6dfe1b6031005d556ad54027c191636299aa4496fd631d1b1dcd23ada8bec7",
     "dest": "vendor/golang.org/x/term",
     "strip-components": 3
   },
   {
     "type": "file",
-    "sha256": "fc70acb871fd2ec9376d0cc87a1b64ab2b71e981013f71256934d5011150d7bc",
+    "sha256": "e58600022fb74e751ecf25f64e41cab617324c5c923b295a547658745d374495",
     "dest": "vendor",
     "path": "modules.txt"
   }
