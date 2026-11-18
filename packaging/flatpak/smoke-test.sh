@@ -15,16 +15,13 @@ flatpak run "$APP" --version | grep -q '^ipmi-connect ' || fail "--version"
 pass "runs in the sandbox: $(flatpak run "$APP" --version)"
 
 perms=$(flatpak info --show-permissions "$APP")
-expect() { grep -qx "$1" <<<"$perms" || fail "expected $1 in: $perms"; }
-expect 'shared=network;ipc;'
-# Flatpak writes --socket=fallback-x11 as "x11;wayland;fallback-x11" for older clients, which
-# still apply the fallback; anything beyond those three (pulseaudio, session-bus, ...) fails.
-sockets=$(sed -n 's/^sockets=//p' <<<"$perms")
-for s in wayland fallback-x11; do [[ ";$sockets" == *";$s;"* ]] || fail "socket $s missing: $sockets"; done
-for s in ${sockets//;/ }; do
-  case $s in (x11|wayland|fallback-x11) ;; (*) fail "unexpected socket $s" ;; esac
-done
-expect 'devices=dri;'
+# The value of one permission line as sorted words: Flatpak versions differ in order, and older
+# ones write --socket=fallback-x11 as "x11;wayland;fallback-x11".
+perm() { sed -n "s/^$1=//p" <<<"$perms" | tr ';' '\n' | sed '/^$/d' | LC_ALL=C sort | tr '\n' ' '; }
+[[ $(perm shared) == "ipc network " ]] || fail "shared: $(perm shared)"
+[[ $(perm devices) == "dri " ]] || fail "devices: $(perm devices)"
+sockets=$(perm sockets)
+[[ $sockets == "fallback-x11 wayland " || $sockets == "fallback-x11 wayland x11 " ]] || fail "sockets: $sockets"
 grep -qE '^(filesystems|persistent)=' <<<"$perms" && fail "unexpected permissions: $perms"
 grep -qE '^\[(Session|System) Bus Policy\]' <<<"$perms" && fail "unexpected bus names: $perms"
 pass "permissions are network, display and GPU only"

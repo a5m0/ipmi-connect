@@ -117,8 +117,9 @@ connection manager. Inside the Flatpak, WebKit starts its web processes with
 `flatpak-spawn --sandbox --no-network`, so the process that renders the page has no network of
 its own. Two things learned:
 
-- Flatpak 1.14 lists `--socket=fallback-x11` as `x11;wayland;fallback-x11`, so the smoke test
-  checks for "only display sockets" rather than an exact string.
+- Flatpak versions print permissions differently: 1.14 writes `shared=network;ipc;` and
+  `sockets=x11;wayland;fallback-x11;`, CI's newer Flatpak writes `shared=ipc;network;` and
+  `sockets=fallback-x11;wayland;`. The smoke test compares sorted sets, not strings.
 - Without a UTF-8 locale, `flatpak-spawn` refuses WebKit's sandbox arguments and the app aborts.
   Desktops always set one; the smoke test sets `LANG=C.UTF-8` when it's unset, for bare CI
   containers.
