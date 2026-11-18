@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -200,10 +201,30 @@ func run(opts options, desktop bool) error {
 	if err != nil {
 		return fmt.Errorf("start the local console: %w", err)
 	}
+	if desktop && nativeWindowBuilt() && !opts.NoBrowser {
+		return serveInWindow(ctx, a, listener, shutdown)
+	}
 	opener := func(url string) { showLink(url, opts.NoBrowser) }
 	go offerNewLinks(ctx, a.server, opts.NoBrowser)
 	if err := a.server.Serve(ctx, listener, opener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("server: %w", err)
 	}
 	return nil
+}
+
+// serveInWindow runs the server in the background and the native window on this goroutine.
+// Closing the window quits; quitting any other way (Quit button, idle timeout, Ctrl+C) closes
+// the window.
+func serveInWindow(ctx context.Context, a *app, listener net.Listener, shutdown func()) error {
+	links := make(chan string, 1)
+	served := make(chan error, 1)
+	go func() {
+		served <- a.server.Serve(ctx, listener, func(url string) { links <- url })
+	}()
+	winErr := runWindow(ctx, links)
+	shutdown()
+	if err := <-served; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("server: %w", err)
+	}
+	return winErr
 }
