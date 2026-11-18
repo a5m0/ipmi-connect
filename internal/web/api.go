@@ -77,7 +77,7 @@ func (s *Server) handlePower(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusServiceUnavailable, badRequest("no BMC is connected"))
 		return
 	}
-	log.Printf("[Server] Received chassis power action: %s", req.Action)
+	log.Printf("[Server] Received chassis power action: %q", req.Action)
 	if err := console.PowerControl(req.Action); err != nil {
 		writeJSONError(w, http.StatusBadGateway, err)
 		return

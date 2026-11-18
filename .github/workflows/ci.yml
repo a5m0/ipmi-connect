@@ -15,8 +15,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# setup-go installs the `go` line of go.mod (the minimum). With auto, the go command then
+# switches to the `toolchain` line (the patched release), downloaded and checksum-verified.
 env:
-  GOTOOLCHAIN: local
+  GOTOOLCHAIN: auto
 
 jobs:
   lint:

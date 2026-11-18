@@ -78,7 +78,7 @@ func (c *Client) PowerControl(action bmc.PowerAction) error {
 
 	bodyBytes, _ := readBody(resp)
 	body := string(bodyBytes)
-	log.Printf("[Dell] PowerControl %s (code %s) -> %s", action, stateStr, snippet(body))
+	log.Printf("[Dell] PowerControl %q (code %s) -> %q", action, stateStr, snippet(body))
 
 	if !strings.Contains(body, "<status>ok</status>") {
 		return fmt.Errorf("power control rejected by BMC: %s", snippet(body))

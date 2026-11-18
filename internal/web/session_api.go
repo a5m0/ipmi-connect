@@ -69,7 +69,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, session.ErrBusy):
 		writeJSONError(w, http.StatusConflict, err)
 	default:
-		log.Printf("[Session] Connection failed: %v", err)
+		log.Printf("[Session] Connection failed: %q", err)
 		writeJSONError(w, http.StatusBadGateway, err)
 	}
 }

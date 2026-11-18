@@ -197,7 +197,7 @@ func (m *Manager) Connect(ctx context.Context, req Request) (Status, error) {
 	defer close(attempt) // after the result is recorded and any late session stopped
 
 	if prev != nil {
-		log.Printf("[Session] Disconnecting from %s before connecting to %s", prev.Host, req.Address)
+		log.Printf("[Session] Disconnecting from %q before connecting to %q", prev.Host, req.Address)
 		m.teardown(prev)
 	}
 
@@ -230,7 +230,7 @@ func (m *Manager) Connect(ctx context.Context, req Request) (Status, error) {
 			log.Printf("[Session] Could not record the recent device: %v", err)
 		}
 	}
-	log.Printf("[Session] Connected to %s (%s)", ep.Host, vendor.Name)
+	log.Printf("[Session] Connected to %q (%s)", ep.Host, vendor.Name)
 	st := Status{Phase: PhaseConnected, Host: ep.Host, Vendor: vendor.Name, Channels: live.Channels()}
 	st.SecurityLevel = bmc.SecurityLevelOf(st.Channels)
 	return st, nil
@@ -318,7 +318,7 @@ func (m *Manager) connect(ctx context.Context, req Request) (*Live, *bmc.Endpoin
 		return nil, nil, nil, ctx.Err()
 	}
 
-	log.Printf("[Session] Logging in to %s (%s) as %s", ep.Host, vendor.Name, req.User)
+	log.Printf("[Session] Logging in to %q (%s) as %q", ep.Host, vendor.Name, req.User)
 	live, err := vendor.Connect(ctx, ep, req.User, req.Password, m.opts.Display)
 	if err != nil {
 		return nil, nil, nil, err
@@ -332,7 +332,7 @@ func (m *Manager) chooseVendor(ctx context.Context, ep *bmc.Endpoint, name strin
 	case "", string(bmc.TargetAuto):
 		t := detectByPort(ctx, ep, m.vendors)
 		if t != "" {
-			log.Printf("[Session] %s looks like a %s BMC", ep.Host, t)
+			log.Printf("[Session] %q looks like a %s BMC", ep.Host, t)
 		}
 		return m.vendors[t], nil // nil: decide after trust from the web banner
 	}
@@ -417,13 +417,13 @@ func (m *Manager) establishTrust(ctx context.Context, ep *bmc.Endpoint, vendor *
 		if err := m.opts.Trust.Replace(device, append(keep, toTrust...)); err != nil {
 			return err
 		}
-		log.Printf("[Trust] Replaced the pinned certificate of %s with %s", device, strings.Join(toReplace, ", "))
+		log.Printf("[Trust] Replaced the pinned certificate of %q with %q", device, strings.Join(toReplace, ", "))
 	} else {
 		for i, fp := range toTrust {
 			if err := m.opts.Trust.Trust(device, fp, i > 0 || hasPins(m.opts.Trust, device)); err != nil {
 				return err
 			}
-			log.Printf("[Trust] Pinned certificate %s for %s at the user's request", fp, device)
+			log.Printf("[Trust] Pinned certificate %s for %q at the user's request", fp, device)
 		}
 	}
 	if kvmTLS != dev.KVMTLS && (kvmTLS || downgraded) {
@@ -464,7 +464,7 @@ func (m *Manager) probe(ctx context.Context, ep *bmc.Endpoint, vendor *Vendor) (
 	if vendor != nil && vendor.Probe != nil {
 		extra, insecure, err := vendor.Probe(ctx, ep)
 		if err != nil {
-			log.Printf("[Session] Probing %s's %s channels: %v (checked again when they connect)", ep.Host, vendor.Name, err)
+			log.Printf("[Session] Probing the %s channels of %q: %q (checked again when they connect)", vendor.Name, ep.Host, err)
 		} else {
 			out.kvmProbed = true
 		}

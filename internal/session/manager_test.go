@@ -424,17 +424,20 @@ func waitPhase(t *testing.T, m *Manager, phase string) {
 func TestDisconnectWaitsForALateLoginToBeLoggedOut(t *testing.T) {
 	bmcSrv := newFakeBMC(t, nil)
 	release := make(chan struct{})
+	loggingIn := make(chan struct{})
 	v := &fakeVendor{}
 	vend := v.vendor()
 	inner := vend.Connect
 	vend.Connect = func(ctx context.Context, ep *bmc.Endpoint, user, pw string, d Display) (*Live, error) {
+		close(loggingIn)
 		<-release // a login that ignores cancellation, like an HTTP request in flight
 		return inner(context.Background(), ep, user, pw, d)
 	}
 	d := &fakeDisplay{}
 	m := NewManager(Options{Trust: trusted(t, bmcSrv), Display: d, Vendors: map[bmc.TargetType]*Vendor{bmc.TargetDell: vend}})
 	go func() { _, _ = m.Connect(context.Background(), req(bmcSrv.addr())) }()
-	waitPhase(t, m, PhaseConnecting)
+	// Past the TLS probes and inside the login: a Disconnect any earlier just cancels the probe.
+	<-loggingIn
 
 	done := make(chan struct{})
 	go func() { m.Disconnect(); close(done) }()

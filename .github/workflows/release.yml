@@ -19,7 +19,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GOTOOLCHAIN: local
+  # Use go.mod's toolchain line (see ci.yml).
+  GOTOOLCHAIN: auto
   SEMANTIC_RELEASE_PACKAGES: >-
     semantic-release@24.2.3
     @semantic-release/changelog@6.0.3

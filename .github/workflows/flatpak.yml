@@ -36,13 +36,21 @@ jobs:
         run: |
           case "$VERSION" in (*[!0-9A-Za-z.+-]*|'') echo "bad version: $VERSION"; exit 1;; esac
           sed -i "s/^    IPMI_CONNECT_VERSION: .*/    IPMI_CONNECT_VERSION: ${VERSION}/" packaging/flatpak/io.github.a5m0.IPMIConnect.yml
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6.8
-        with:
-          bundle: ipmi-connect_${{ inputs.version }}_linux_${{ matrix.arch }}.flatpak
-          manifest-path: packaging/flatpak/io.github.a5m0.IPMIConnect.yml
-          arch: ${{ matrix.arch }}
-          cache-key: flatpak-builder-${{ matrix.arch }}-${{ hashFiles('packaging/flatpak/*') }}
-          upload-artifact: false
+      # flatpak-builder runs directly rather than through flatpak-github-actions, which updates
+      # the runtimes preinstalled in the image's system installation; on x86_64 that update
+      # fails ("Invalid cross-device link", a rename across the container's overlay layers).
+      # A fresh user installation of the pinned runtime branch avoids touching those layers.
+      - name: Install the SDK
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive --arch=${{ matrix.arch }} flathub \
+            org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08 org.freedesktop.Sdk.Extension.golang//26.08
+      - name: Build
+        run: |
+          flatpak-builder --user --disable-rofiles-fuse --force-clean --arch=${{ matrix.arch }} \
+            --repo=repo build-dir packaging/flatpak/io.github.a5m0.IPMIConnect.yml
+          flatpak build-bundle --arch=${{ matrix.arch }} --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+            repo ipmi-connect_${{ inputs.version }}_linux_${{ matrix.arch }}.flatpak io.github.a5m0.IPMIConnect
       - name: Install and smoke test
         run: |
           flatpak install --user -y --noninteractive --bundle ipmi-connect_${{ inputs.version }}_linux_${{ matrix.arch }}.flatpak

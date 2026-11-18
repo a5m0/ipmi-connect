@@ -178,6 +178,9 @@ func (e *Endpoint) DialPort(ctx context.Context, port int) (net.Conn, error) {
 	if !e.portAllowed(port) {
 		return nil, fmt.Errorf("refusing to connect to %s port %d: not a port this BMC uses", e.Host, port)
 	}
+	if port < 1 || port > 65535 { // allowed ports are range-checked too; keep the conversion safe here
+		return nil, fmt.Errorf("port %d is out of range", port)
+	}
 	d := net.Dialer{Timeout: endpointDialTimeout}
 	return d.DialContext(ctx, "tcp", netip.AddrPortFrom(e.addr, uint16(port)).String())
 }
