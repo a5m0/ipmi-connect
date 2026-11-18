@@ -74,8 +74,9 @@ Dependencies flow top to bottom. Each item lists its acceptance criteria.
   device is accepted on any of that device's TLS endpoints (HTTPS 443 and APCP 7578). Whether the
   Dell APCP channel presents the same certificate as the web server is unverified **[hw]**; the set
   handles both cases. Both endpoints are probed before credentials are sent.
-- **D2: CA-valid certificates are always accepted**, pinned or not. Pins exist for self-signed
-  certificates; WebPKI verification is the stronger check when it applies.
+- **D2 (revised after review): pins take precedence.** A device with a pinned certificate must
+  present it; a different certificate is a change to confirm, even if CA-signed. Devices without
+  pins are accepted on normal CA verification.
 - **D3: legacy TLS and insecure channels need consent per device**, stored with the trust entry
   and shown in the UI, revocable by forgetting the device.
 - **D4: the CLI now refuses unknown certificates.** Interactive runs prompt with the fingerprint;
@@ -92,45 +93,114 @@ Dependencies flow top to bottom. Each item lists its acceptance criteria.
   green `main`; publishing now needs an explicit run.
 - **D9: Crostini uses a fixed port.** ChromeOS forwards only configured container ports to
   the browser, so desktop mode on Crostini binds 8080 (or `--web-port`) instead of an ephemeral port.
+- **D10: the Flatpak ID stays `io.github.a5m0.IPMIConnect`** as specified, but Flathub derives
+  the repository URL from the last component (`github.com/a5m0/IPMIConnect`, which does not
+  exist): a Flathub submission needs either `io.github.a5m0.ipmi-connect` or a reviewer
+  exception. Decide before the first public Flatpak release; see packaging/flatpak/README.md.
+- **D11: Go 1.27.4 toolchain.** `go.mod` keeps `go 1.27.2` as the minimum and adds
+  `toolchain go1.27.4` for the net/http and crypto/x509 fixes govulncheck reported.
+- **D12: the launch link stays in the browser's command line.** A private-file handoff would
+  hide it from other local users, but Ubuntu's snap Firefox cannot read `/run/user` or hidden
+  folders. The link is no longer logged on desktop launches; the residual risk is documented.
 
 ## Checklist
 
-Status is kept current as work lands; see the end of this file for findings and blockers.
+- [x] 1 TLS trust policy (`internal/trust`)
+- [x] 2 Endpoint and dial guard (`internal/bmc/endpoint.go`)
+- [x] 3 Vendor clients on the endpoint (Dell HTTPS + APCP TLS, Supermicro HTTPS)
+- [x] 4 Parser hardening and fuzzing (13 fuzz targets; parallel workstream)
+- [x] 5 Local server hardening
+- [x] 6 Session manager (`internal/session`)
+- [x] 7 Desktop mode and UI (connection manager, consent dialog, security indicator)
+- [x] 8 Virtual media confinement (media roots, open-and-compare, read-only default)
+- [x] 9 Portals (OpenURI, FileChooser) — **[platform]** dialogs not exercised on a desktop
+- [x] 10 Flatpak (built and smoke-tested on x86_64; aarch64 in CI only)
+- [x] 11 CI/release (workflows written and actionlint-clean; **not yet run on GitHub**)
+- [x] 12 Documentation
+- [x] Independent security review and fixes
 
-- [ ] 1 TLS trust policy
-- [ ] 2 Endpoint and dial guard
-- [ ] 3 Vendor clients on the endpoint
-- [ ] 4 Parser hardening and fuzzing
-- [ ] 5 Local server hardening
-- [ ] 6 Session manager
-- [ ] 7 Desktop mode and UI
-- [ ] 8 Virtual media confinement
-- [ ] 9 Portals
-- [ ] 10 Flatpak
-- [ ] 11 CI/release
-- [ ] 12 Documentation
-- [ ] Independent security review and fixes
+## Security findings
 
-## Security findings (audit of the baseline)
+### Baseline audit
 
 | ID | Area | Finding | Severity | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| F1 | `bmc/legacytls.go` | Every TLS connection used `InsecureSkipVerify` with no pinning: a MITM receives the web password and KVM tokens. | High | open |
-| F2 | `web/files.go` | `/api/files` lists any directory; `/api/media/images` and `/api/media/create` accept any absolute path, including writes. | High (with a stolen token) | open |
-| F3 | `vmedia/images.go` | Image is stat'ed at add time and reopened by path at map time: a swapped file or symlink is served (and written). | Medium | open |
-| F4 | `web/static/app.js` | Session token kept in `localStorage` (persists across runs) and sent in the WebSocket URL. | Medium | open |
-| F5 | `web/security.go` | Launch code never expires; no logout or token invalidation. | Medium | open |
-| F6 | `web/security.go` | Host/Origin accept any loopback name and any port, so another local origin can pass the Origin check. | Medium | open |
-| F7 | `dell/channels.go` | JNLP tokens longer than 96 bytes overrun the `cb` payload layout (and longer than 208 bytes panic). | Medium (malicious BMC) | open |
-| F8 | `dell/session.go`, `dell/power.go` | HTTP bodies from the BMC read with unbounded `io.ReadAll`. | Medium | open |
-| F9 | `cmd/frames.go` | Dell frame assembler appends continuation chunks without a cap. | Medium | open |
-| F10 | `dell/session.go` | JNLP `kmport`/`vport` accepted without range validation. | Low | open |
-| F11 | `cmd/detect.go` | Vendor detection did an unverified HTTPS request. | Low | open |
-| F12 | `web/server.go` | No limit on concurrent sockets or requests; no idle cleanup. | Low | open |
-| F13 | `web/security.go` | CSP allowed `style-src 'unsafe-inline'`. | Low | open |
-| F14 | CLI | `-p` puts the password in the process list (already warned in help). | Low | open |
+| F1 | `bmc/legacytls.go` | Every TLS connection used `InsecureSkipVerify` with no pinning: a MITM receives the web password and KVM tokens | High | Fixed: `trust.Policy` on every handshake; credentials only after all endpoints are trusted |
+| F2 | `web/files.go`, `web/media.go` | File listing and image/create paths anywhere on disk | High (with a stolen token) | Fixed: `MediaRoots` |
+| F3 | `vmedia/images.go` | Stat at add, reopen by path at map (swap/symlink TOCTOU) | Medium | Fixed: `O_NOFOLLOW` + same-file check |
+| F4 | `static/app.js` | Token in `localStorage` and in the WebSocket URL | Medium | Fixed: `sessionStorage`, single-use tickets |
+| F5 | `web/security.go` | Launch code never expired; no logout | Medium | Fixed: 2 min expiry, logout rotates the token |
+| F6 | `web/security.go` | Any loopback Host/Origin on any port accepted | Medium | Fixed: exact origin |
+| F7 | `dell/channels.go` | JNLP tokens > 96 bytes overran the `cb` layout (> 208 panicked) | Medium | Fixed: length checks |
+| F8 | `dell/session.go`, `dell/power.go` | Unbounded `io.ReadAll` of BMC responses | Medium | Fixed: 1 MiB cap |
+| F9 | `cmd/frames.go` | Unbounded Dell frame assembly | Medium | Fixed: 16 MiB cap |
+| F10 | `dell/session.go` | JNLP ports not range-checked | Low | Fixed |
+| F11 | `cmd/detect.go` | Unverified HTTPS request for vendor detection | Low | Fixed: port checks first, banner only over a trusted connection |
+| F12 | `web/server.go` | No request/socket limits, no idle cleanup | Low | Fixed |
+| F13 | `web/security.go` | CSP allowed inline styles | Low | Fixed, verified in Chromium |
+| F14 | CLI | `-p` exposes the password | Low | Deprecated with a warning |
+| F15 | dependencies | GO-2026-6865 (klauspost/compress), GO-2026-6859, GO-2026-6809 (stdlib) | Medium | Fixed: compress v1.20.2, Go 1.27.4 |
+
+### Parser hardening (parallel workstream, fuzzing)
+
+| Where | Finding | Status |
+| :--- | :--- | :--- |
+| `atenvm/target_data.go` | Truncated READ TOC / MODE SENSE(10) CDBs panicked the process (found by fuzzing) | Fixed; crash input kept as a seed |
+| `supermicro/messages.go` | 65535 rects × 64 MiB per update | Fixed: 64 MiB per update |
+| `supermicro/handshake.go`, `atenvm/framing.go` | Allocation before data arrived | Fixed: incremental reads |
+| `supermicro/jnlp.go` | Unbounded tokens | Fixed: 256 bytes |
+| `dell/video.go` | Implausible frame geometry | Fixed: 4096 limit |
+| `atenvm/target.go` | `Execute` reads up to 4 GiB in one buffer | Fixed: 1 MiB |
+| `supermicro/session.go` | A picture allocated per resized rect before checking it | Fixed: once per update, drawable rects only |
+
+### Independent review of the changes
+
+| # | Finding | Severity | Status |
+| :--- | :--- | :--- | :--- |
+| R1 | Launch code visible in the browser's command line to other local users; logged on desktop launches | Medium | Partly fixed: no longer logged; argv exposure documented (D12) |
+| R2 | Two instances overwrite each other's trust-store changes | Medium/low | Fixed: file lock, re-read before write |
+| R3 | Create Image from a folder copied dotfiles | Low | Fixed |
+| R4 | A previous session's picture could show in the next | Low | Fixed |
+| R5 | Quit during a connection attempt could leave the Dell logged in | Low | Fixed: Disconnect waits for the attempt |
+| R6 | CA-valid certificate overrode a pin | Low | Fixed (D2 revised) |
+| R7 | One stored consent silently accepted a later TLS strip on the Dell KVM port | Low | Fixed: KVM TLS remembered, downgrade re-asks |
+| R8 | No probe handshake deadline; portal response sender unchecked; binding WaitGroup misuse | Info | Fixed |
+| R8 | Fixed CLI port could be squatted after exit | Info | Documented |
+| R8 | Banner-detected vendor may show a second certificate as "changed" | Info | Open (edge case: only when ports did not identify the vendor) |
+| R9 | Intermediate-folder symlink race in shared writable media folders | Suspicion | Documented |
+
+## Test results (development environment, 2026-11-18)
+
+| Check | Command | Result |
+| :--- | :--- | :--- |
+| Format, vet | `gofmt -l .`, `go vet ./...` | clean |
+| Lint | `golangci-lint run ./...` (v2.15.0 built with go1.27) | 0 issues |
+| Unit and integration | `go test -race -count=1 ./...` | pass (15 packages) |
+| Vulnerabilities | `go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...` | no vulnerabilities (after F15) |
+| Licences | `go-licenses check ./... --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,MPL-2.0,ISC` | pass |
+| Fuzzing | 13 targets, 20-30 s each (`go test -run=^$ -fuzz=...`) | pass after the atenvm fix |
+| Browser UI | `node test/e2e/ui.mjs` (Playwright 1.63, Chromium) | pass: sign-in, consent, video over WebSocket, security badge, token handling, replay, disconnect, no CSP violations |
+| Flatpak build | `flatpak-builder` 1.4.2, Freedesktop 26.08, golang 1.27.4, offline | pass (x86_64) |
+| Flatpak metadata | `desktop-file-validate`, `appstreamcli validate` | pass |
+| Flatpak smoke | `packaging/flatpak/smoke-test.sh` under `dbus-run-session` | pass (x86_64) |
+| Release script | `scripts/build-release.sh 0.0.0-local` | 4 archives, Flatpak, CycloneDX SBOM, checksums |
+| Workflows | `actionlint` v1.7.12; every action pinned to a commit SHA | pass |
+
+Not run here: the GitHub Actions workflows themselves (including aarch64 Flatpak, CodeQL,
+attestations), macOS, any real BMC, portal dialogs on a desktop, ChromeOS.
 
 ## Blockers and open questions
 
 - Physical hardware is not available in this environment; every protocol-facing change is tested
-  against fakes only. See the **[hw]** items.
+  against fakes only. See [testing/hardware-validation.md](testing/hardware-validation.md).
+- The Flathub ID question (D10) is the owner's decision.
+- Renovate's `assignees` still names the upstream author (inherited from the fork).
+
+## Follow-up
+
+- Single-instance handoff for a second desktop launch.
+- Opt-in password storage via the Secret portal / Secret Service.
+- Re-validate the launch-link handoff (R1) if confined browsers gain access to a private
+  location, or offer it where the browser is known to be unconfined.
+- Supermicro "KVM SSL" firmware; newer BMC generations.
+- A ChromeOS Isolated Web App front end.

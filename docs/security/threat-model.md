@@ -42,7 +42,7 @@ physical access. This document lists what we defend against, how, and what remai
 
 | Attack | Mitigation |
 | :--- | :--- |
-| Reads the launch link from the process list (`xdg-open <url>`) or terminal | The code is in the URL fragment, works once, and expires after 2 minutes (10 with `--no-browser` or on ChromeOS); the page removes it from the address bar |
+| Reads the launch link from the process list (`xdg-open <url>`, the browser's command line) or a log | The code is in the URL fragment, works once, and expires after 2 minutes (10 with `--no-browser` or on ChromeOS); the page removes it from the address bar; it is printed only when it must be copied by hand, so desktop launches do not put it in the journal. **Residual:** on a multi-user machine without `hidepid`, another local user who polls `/proc/*/cmdline` can redeem the code before the browser does. The real tab then reports the link as already used. Mount `/proc` with `hidepid=2` on shared machines. A private-file handoff was considered and rejected for now: confined browsers (Ubuntu's snap Firefox) cannot read `/run/user` |
 | Replays a token from browser storage | Token is in `sessionStorage` (per tab, cleared on close), not `localStorage` or cookies; Logout rotates it |
 | Connects to the loopback port | Needs the token; the server binds 127.0.0.1 only |
 | Reads the trust store or profiles | Files are 0600 in a 0700 folder |
@@ -56,7 +56,9 @@ memory, or attach a debugger. We do not defend against same-user malware.
 | :--- | :--- |
 | TLS interception to capture the password | Every TLS connection runs `trust.Policy`: CA-verified for the dialled name, or a pinned SHA-256 fingerprint. Unknown or changed certificates fail the handshake before any application data. Credentials are sent only after all TLS endpoints are probed and accepted (`session.Manager`) |
 | Silent trust on first use | TOFU needs explicit confirmation of the displayed fingerprint (UI checkbox, typed `yes`, or `--trust-fingerprint`); only fingerprints the probe observed can be pinned |
-| Certificate swapped later | `CertificateChangedError`; replacement needs an explicit second confirmation (`replace`) |
+| Certificate swapped later | `CertificateChangedError`, also when the new certificate is CA-signed; replacement needs an explicit second confirmation (`replace`) |
+| Stripping TLS from the Dell KVM channel (clearing the APCP capability bit) | Once a device's KVM port has offered TLS, a plain offer needs fresh consent with a warning, whatever was allowed before, and the client refuses it meanwhile |
+| Two app instances overwriting each other's pins | Trust store changes take a file lock and apply to the latest file; reads notice other processes' writes |
 | Downgrade to obsolete TLS | TLS 1.2+ with AEAD suites by default; TLS 1.0/1.1 and CBC/3DES only after per-device consent, shown in the security indicator |
 | HTTPS to HTTP downgrade | No code path uses http://; redirects to http are refused |
 | Redirect or JNLP pointing elsewhere | `bmc.Endpoint` dials only the resolved BMC address on allowed ports; redirects must stay on the same https origin; JNLP ports are range-checked and tokens length-checked |
@@ -80,6 +82,8 @@ memory, or attach a debugger. We do not defend against same-user malware.
 | Symlink escape or `..` traversal | Paths are resolved with `EvalSymlinks` before the containment check; links leading out of a root are not listed |
 | Swapping the file between add and map (TOCTOU) | The image is opened `O_NOFOLLOW` and must be the same file (device and inode) at map time |
 | Overwriting files with Create Image | New images only in allowed folders, never over an existing file, never hidden names |
+| Leaking dotfiles into an image | Create Image from a folder leaves out hidden files and folders (`.git`, `.env`, `.ssh`) |
+| Swapping a parent folder for a symlink between the check and the open | **Residual:** the final component is opened without following links and compared with what was added, but intermediate folders are not; in a folder other local users can write to, a race could redirect to another file the user can read. Do not use shared, world-writable folders as `--media-dir` |
 | Unintended writes to the host's disk image | Read-only by default; writable needs `confirm_writable` and a UI confirmation |
 
 ### T6. A compromised ipmi-connect process
@@ -96,10 +100,13 @@ permission is all or nothing. Outside Flatpak, the process has the user's full p
 3. TOFU is only as good as the user's fingerprint check on first contact.
 4. The BMC password stays in process memory for the session (Go cannot reliably wipe strings).
 5. Flatpak does not restrict network destinations; the endpoint scoping is in-process only.
-6. CA-verified certificates are accepted even for a device with a pin (decision D2 in the
-   implementation plan): an attacker holding a publicly trusted certificate for the BMC's name
-   could impersonate it. BMCs on IP addresses or internal names rarely have such certificates.
-7. A same-user local attacker (see T2).
-8. Browser bugs.
+6. A device that was CA-verified (never pinned) and later shows a self-signed certificate is
+   reported as "not trusted yet" rather than "changed", because nothing about it was recorded.
+7. Another local user reading the launch link from a process's command line (T2).
+8. A same-user local attacker (see T2).
+9. In CLI mode the console uses the fixed port 8080 by default; after ipmi-connect exits, another
+   local program could listen there and show a look-alike page. Only enter BMC passwords in a
+   page ipmi-connect has just opened.
+10. Browser bugs.
 
 Use a dedicated management network for BMCs regardless of these mitigations.
