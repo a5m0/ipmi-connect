@@ -155,13 +155,20 @@ func request(ctx context.Context, conn *dbus.Conn, method string, wantResults bo
 		_ = conn.AddMatchSignal(dbus.WithMatchObjectPath(got), dbus.WithMatchInterface(requestIfc), dbus.WithMatchMember("Response"))
 		handle = got
 	}
+	// Only the portal's own connection may answer: another client on the bus could otherwise
+	// emit a Response that names a file the user never chose. (The call above activated the
+	// portal, so it has an owner now.)
+	var owner string
+	if err := conn.BusObject().CallWithContext(ctx, "org.freedesktop.DBus.GetNameOwner", 0, busName).Store(&owner); err != nil {
+		return nil, fmt.Errorf("portal owner: %w", err)
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			_ = conn.Object(busName, handle).Call(requestIfc+".Close", 0).Err
 			return nil, ctx.Err()
 		case sig := <-signals:
-			if sig == nil || sig.Path != handle || sig.Name != requestIfc+".Response" || len(sig.Body) < 2 {
+			if sig == nil || sig.Sender != owner || sig.Path != handle || sig.Name != requestIfc+".Response" || len(sig.Body) < 2 {
 				continue
 			}
 			code, _ := sig.Body[0].(uint32)

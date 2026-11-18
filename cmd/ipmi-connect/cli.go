@@ -152,11 +152,23 @@ func offerNewLinks(ctx context.Context, server *web.Server, noBrowser bool) {
 			if !ok {
 				return
 			}
-			url := server.LaunchURL()
-			log.Printf("Console: %s", url)
-			if !noBrowser {
-				openBrowser(url)
-			}
+			showLink(server.LaunchURL(), noBrowser)
 		}
 	}
+}
+
+// showLink opens a launch link in the browser, or prints it. The link signs a browser in, so it
+// is printed (and so may end up in a log, e.g. the journal for desktop launches) only when it
+// has to be copied by hand: with --no-browser, or when no browser could be opened.
+func showLink(url string, noBrowser bool) {
+	origin, _, _ := strings.Cut(url, "#")
+	if !noBrowser && openBrowser(url) {
+		log.Printf("Console opened in your browser at %s", origin)
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			log.Printf("Closed the tab? Press Enter here to open it again.")
+		}
+		return
+	}
+	log.Printf("Console: %s", url)
+	log.Printf("Open this link in a browser on this computer. It works once and expires; press Enter for a new one.")
 }

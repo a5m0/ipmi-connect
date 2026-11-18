@@ -8,6 +8,7 @@ import (
 	"net"
 	"slices"
 	"sync"
+	"time"
 )
 
 // Connection describes one accepted TLS connection, for the security indicator.
@@ -102,13 +103,15 @@ func (p *Policy) check(serverName, endpoint string, certs []*x509.Certificate, v
 		conn.Auth = AuthPinned
 		return conn, nil
 	}
+	// A pinned device must present a pinned certificate, even one a CA would vouch for: the
+	// user chose that certificate, and a different one is a change to confirm.
+	if len(dev.Fingerprints) > 0 {
+		return Connection{}, &CertificateChangedError{Device: p.Device, Endpoint: endpoint, Cert: Describe(leaf), Pinned: dev.Fingerprints}
+	}
 	verr := verifyChain(certs, serverName, p.Roots)
 	if verr == nil {
 		conn.Auth = AuthCA
 		return conn, nil
-	}
-	if len(dev.Fingerprints) > 0 {
-		return Connection{}, &CertificateChangedError{Device: p.Device, Endpoint: endpoint, Cert: Describe(leaf), Pinned: dev.Fingerprints}
 	}
 	return Connection{}, &UnknownCertificateError{Device: p.Device, Endpoint: endpoint, Cert: Describe(leaf), Reason: shortReason(verr)}
 }
@@ -148,6 +151,10 @@ type ProbeResult struct {
 	version, suite uint16
 }
 
+// probeTimeout bounds one probe handshake, so a BMC that stalls cannot hold a connection
+// attempt.
+const probeTimeout = 15 * time.Second
+
 // errProbeDone stops a probe handshake once the certificate has been seen.
 var errProbeDone = errors.New("probe complete")
 
@@ -160,6 +167,9 @@ var errProbeDone = errors.New("probe complete")
 // may be asked about it.
 func Probe(ctx context.Context, conn net.Conn, serverName, endpoint string, legacy bool) (ProbeResult, error) {
 	defer conn.Close()
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	_ = conn.SetDeadline(time.Now().Add(probeTimeout))
 	var res ProbeResult
 	cfg := baseConfig(serverName, legacy)
 	cfg.VerifyConnection = func(cs tls.ConnectionState) error {

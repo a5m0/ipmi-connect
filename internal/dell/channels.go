@@ -73,7 +73,7 @@ func (c *Client) connectAPCPVersion(port int, mode, major, minor byte) (net.Conn
 
 	if serverCaps&apcpCapTLS == 0 {
 		// The BMC would carry the one-time tokens, keystrokes and screen in clear text.
-		if !c.ep.InsecureChannelsAllowed() {
+		if !c.ep.PlainKVMAllowed() {
 			rawConn.Close()
 			return nil, ErrPlainAPCP
 		}

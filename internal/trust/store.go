@@ -22,8 +22,11 @@ type Device struct {
 	LegacyTLS bool `json:"legacy_tls,omitempty"`
 	// InsecureChannels records consent to channels without effective encryption (plain RFB
 	// KVM, RC4 virtual media under a public key, or an APCP channel without TLS).
-	InsecureChannels bool      `json:"insecure_channels,omitempty"`
-	Updated          time.Time `json:"updated"`
+	InsecureChannels bool `json:"insecure_channels,omitempty"`
+	// KVMTLS records that the device's KVM port has offered TLS. Losing it later looks like a
+	// downgrade attack, so it needs fresh consent even when InsecureChannels is set.
+	KVMTLS  bool      `json:"kvm_tls,omitempty"`
+	Updated time.Time `json:"updated"`
 }
 
 // Store holds trust decisions, persisted as JSON when it has a path.
@@ -32,6 +35,13 @@ type Store struct {
 
 	mu      sync.Mutex
 	devices map[string]Device
+	loaded  fileStamp // what devices was last read from, to notice another instance's writes
+}
+
+// fileStamp identifies a version of the store file.
+type fileStamp struct {
+	size    int64
+	modTime time.Time
 }
 
 // storeFile is the on-disk format.
@@ -48,27 +58,40 @@ const maxStoreFile = 4 << 20
 // NewMemoryStore returns a store that is not persisted (for tests and --no-save runs).
 func NewMemoryStore() *Store { return &Store{devices: map[string]Device{}} }
 
-// OpenStore loads the store at path; a missing file is an empty store.
+// OpenStore loads the store at path; a missing file is an empty store. Several processes may
+// share the file: every change is made under a file lock on the latest contents, and reads pick
+// up other processes' changes.
 func OpenStore(path string) (*Store, error) {
 	s := &Store{path: path, devices: map[string]Device{}}
-	f, err := os.Open(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return s, nil
-	}
+	devices, stamp, err := readStore(path)
 	if err != nil {
 		return nil, err
+	}
+	s.devices, s.loaded = devices, stamp
+	return s, nil
+}
+
+// readStore parses the file at path (missing: empty).
+func readStore(path string) (map[string]Device, fileStamp, error) {
+	devices := map[string]Device{}
+	f, err := os.Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return devices, fileStamp{}, nil
+	}
+	if err != nil {
+		return nil, fileStamp{}, err
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return nil, fileStamp{}, err
 	}
 	if info.Size() > maxStoreFile {
-		return nil, fmt.Errorf("%s is too large to be a trust store", path)
+		return nil, fileStamp{}, fmt.Errorf("%s is too large to be a trust store", path)
 	}
 	var file storeFile
 	if err := json.NewDecoder(f).Decode(&file); err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, fileStamp{}, fmt.Errorf("read %s: %w", path, err)
 	}
 	for k, d := range file.Devices {
 		var fps []string
@@ -78,9 +101,30 @@ func OpenStore(path string) (*Store, error) {
 			}
 		}
 		d.Fingerprints = fps
-		s.devices[DeviceKey(k)] = d
+		devices[DeviceKey(k)] = d
 	}
-	return s, nil
+	return devices, fileStamp{info.Size(), info.ModTime()}, nil
+}
+
+// refreshLocked re-reads the file if another process changed it. A file that has become
+// unreadable keeps the last good contents: decisions are never silently dropped.
+func (s *Store) refreshLocked() {
+	if s.path == "" {
+		return
+	}
+	info, err := os.Stat(s.path)
+	stamp := fileStamp{}
+	if err == nil {
+		stamp = fileStamp{info.Size(), info.ModTime()}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	if stamp == s.loaded {
+		return
+	}
+	if devices, st, err := readStore(s.path); err == nil {
+		s.devices, s.loaded = devices, st
+	}
 }
 
 // Path is where the store is saved ("" for memory).
@@ -90,6 +134,7 @@ func (s *Store) Path() string { return s.path }
 func (s *Store) Get(device string) (Device, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.refreshLocked()
 	d, ok := s.devices[DeviceKey(device)]
 	d.Fingerprints = slices.Clone(d.Fingerprints)
 	return d, ok
@@ -99,6 +144,7 @@ func (s *Store) Get(device string) (Device, bool) {
 func (s *Store) List() map[string]Device {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.refreshLocked()
 	out := make(map[string]Device, len(s.devices))
 	for k, d := range s.devices {
 		d.Fingerprints = slices.Clone(d.Fingerprints)
@@ -160,10 +206,23 @@ func (s *Store) SetConsent(device string, legacyTLS, insecureChannels bool) erro
 	})
 }
 
+// SetKVMTLS records whether the device's KVM port is known to offer TLS.
+func (s *Store) SetKVMTLS(device string, on bool) error {
+	return s.update(device, func(d *Device) error {
+		d.KVMTLS = on
+		return nil
+	})
+}
+
 // Forget removes every decision about a device.
 func (s *Store) Forget(device string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, err := s.lockFile()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	key := DeviceKey(device)
 	if _, ok := s.devices[key]; !ok {
 		return nil
@@ -184,6 +243,11 @@ func (s *Store) update(device string, change func(*Device) error) error {
 	if key == "" {
 		return errors.New("no device name")
 	}
+	unlock, err := s.lockFile()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	prev, existed := s.devices[key]
 	d := prev
 	d.Fingerprints = slices.Clone(prev.Fingerprints)
@@ -218,7 +282,35 @@ func (s *Store) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	return WriteFileAtomic(s.path, append(data, '\n'))
+	if err := WriteFileAtomic(s.path, append(data, '\n')); err != nil {
+		return err
+	}
+	if info, err := os.Stat(s.path); err == nil {
+		s.loaded = fileStamp{info.Size(), info.ModTime()}
+	}
+	return nil
+}
+
+// lockFile takes the inter-process lock and reloads the latest contents, so a change applies to
+// what is on disk now, not to what this process read earlier. Call with s.mu held.
+func (s *Store) lockFile() (unlock func(), err error) {
+	if s.path == "" {
+		return func() {}, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+		return nil, err
+	}
+	release, err := lockPath(s.path + ".lock")
+	if err != nil {
+		return nil, fmt.Errorf("lock the trust store: %w", err)
+	}
+	devices, stamp, err := readStore(s.path)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	s.devices, s.loaded = devices, stamp
+	return release, nil
 }
 
 // WriteFileAtomic replaces path with data, readable only by the owner. Parent directories are

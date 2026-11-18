@@ -388,3 +388,53 @@ func TestDeviceKey(t *testing.T) {
 		}
 	}
 }
+
+func TestTwoProcessesDoNotLoseEachOthersPins(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "trust.json")
+	a, _ := OpenStore(path)
+	b, _ := OpenStore(path) // both opened before either wrote
+	fa, fb := strings.Repeat("aa", 32), strings.Repeat("bb", 32)
+	if err := a.Trust("bmc-a", fa, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Trust("bmc-b", fb, false); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := OpenStore(path)
+	if _, ok := c.Get("bmc-a"); !ok {
+		t.Error("the second process's write dropped the first one's pin")
+	}
+	if _, ok := c.Get("bmc-b"); !ok {
+		t.Error("pin lost")
+	}
+	// A pin made by another process is seen by Get, so a changed certificate is reported as changed.
+	if d, ok := b.Get("bmc-a"); !ok || len(d.Fingerprints) != 1 {
+		t.Errorf("b does not see a's pin: %+v", d)
+	}
+	// Forget in one process is not undone by another's later write.
+	if err := a.Forget("bmc-b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SetConsent("bmc-a", true, false); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := OpenStore(path)
+	if _, ok := d.Get("bmc-b"); ok {
+		t.Error("a Forget was undone by another process")
+	}
+}
+
+func TestPinnedDeviceRefusesADifferentCAValidCertificate(t *testing.T) {
+	ca := testCert(t, "Test CA", nil, true)
+	leaf := testCert(t, "bmc.test", &ca, false)
+	addr, _ := tlsServer(t, &tls.Config{Certificates: []tls.Certificate{leaf}})
+	roots := x509.NewCertPool()
+	roots.AddCert(ca.Leaf)
+	store := NewMemoryStore()
+	_ = store.Trust("bmc.test", strings.Repeat("ab", 32), false)
+	p := &Policy{Store: store, Device: "bmc.test", Roots: roots}
+	var changed *CertificateChangedError
+	if err := roundTrip(t, p, addr, "bmc.test"); !errors.As(err, &changed) {
+		t.Fatalf("err = %v, want CertificateChangedError", err)
+	}
+}

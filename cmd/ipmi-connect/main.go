@@ -200,13 +200,7 @@ func run(opts options, desktop bool) error {
 	if err != nil {
 		return fmt.Errorf("start the local console: %w", err)
 	}
-	opener := func(url string) {
-		log.Printf("Console: %s", url)
-		log.Printf("The link works once and expires; press Enter here for a new one.")
-		if !opts.NoBrowser {
-			openBrowser(url)
-		}
-	}
+	opener := func(url string) { showLink(url, opts.NoBrowser) }
 	go offerNewLinks(ctx, a.server, opts.NoBrowser)
 	if err := a.server.Serve(ctx, listener, opener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("server: %w", err)

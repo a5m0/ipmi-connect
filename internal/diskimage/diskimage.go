@@ -167,9 +167,15 @@ func fatLabel(label string) string {
 func spaceNeeded(dir string) (int64, error) {
 	const cluster = 4096
 	var total int64
-	err := filepath.WalkDir(dir, func(_ string, e fs.DirEntry, err error) error {
+	err := filepath.WalkDir(dir, func(p string, e fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if skip := skipHidden(dir, p, e); skip != nil {
+			if skip == errSkipFile {
+				return nil
+			}
+			return skip
 		}
 		info, err := e.Info()
 		if err != nil {
@@ -187,11 +193,33 @@ func spaceNeeded(dir string) (int64, error) {
 	return total, nil
 }
 
-// copyTree copies dir's directories and regular files into the image's root.
+// skipHidden makes WalkDir pass over hidden entries (dotfiles and dot-folders such as .git,
+// .ssh or .env), which a user copying a folder into a disk image for another machine rarely
+// means to include. It returns nil for entries to keep.
+func skipHidden(root, p string, e fs.DirEntry) error {
+	if p == root || !strings.HasPrefix(e.Name(), ".") {
+		return nil
+	}
+	if e.IsDir() {
+		return filepath.SkipDir
+	}
+	return errSkipFile
+}
+
+// errSkipFile marks a hidden file; the walk callbacks turn it into "continue".
+var errSkipFile = errors.New("skip")
+
+// copyTree copies dir's directories and regular files, except hidden ones, into the image's root.
 func copyTree(fsys filesystem.FileSystem, dir string) error {
 	return filepath.WalkDir(dir, func(p string, e fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if skip := skipHidden(dir, p, e); skip != nil {
+			if skip == errSkipFile {
+				return nil
+			}
+			return skip
 		}
 		rel, err := filepath.Rel(dir, p)
 		if err != nil || rel == "." {

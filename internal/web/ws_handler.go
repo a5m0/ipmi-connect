@@ -35,10 +35,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Registered first so they run last: after the input release below.
+	if !b.acquire() {
+		http.Error(w, "the BMC session is ending", http.StatusConflict)
+		return
+	}
+	defer b.release()
 	s.connWG.Add(1)
 	defer s.connWG.Done()
-	b.wg.Add(1)
-	defer b.wg.Done()
 
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {

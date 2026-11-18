@@ -420,3 +420,81 @@ func waitPhase(t *testing.T, m *Manager, phase string) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+func TestDisconnectWaitsForALateLoginToBeLoggedOut(t *testing.T) {
+	bmcSrv := newFakeBMC(t, nil)
+	release := make(chan struct{})
+	v := &fakeVendor{}
+	vend := v.vendor()
+	inner := vend.Connect
+	vend.Connect = func(ctx context.Context, ep *bmc.Endpoint, user, pw string, d Display) (*Live, error) {
+		<-release // a login that ignores cancellation, like an HTTP request in flight
+		return inner(context.Background(), ep, user, pw, d)
+	}
+	d := &fakeDisplay{}
+	m := NewManager(Options{Trust: trusted(t, bmcSrv), Display: d, Vendors: map[bmc.TargetType]*Vendor{bmc.TargetDell: vend}})
+	go func() { _, _ = m.Connect(context.Background(), req(bmcSrv.addr())) }()
+	waitPhase(t, m, PhaseConnecting)
+
+	done := make(chan struct{})
+	go func() { m.Disconnect(); close(done) }()
+	select {
+	case <-done:
+		t.Fatal("Disconnect returned while the login was still in flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	<-done
+	if v.stopped.Load() != 1 {
+		t.Errorf("the late session was stopped %d times before Disconnect returned", v.stopped.Load())
+	}
+	if d.attached != 0 || m.Status().Phase != PhaseIdle {
+		t.Errorf("attached %d, phase %s", d.attached, m.Status().Phase)
+	}
+}
+
+func TestKVMLosingTLSNeedsFreshConsent(t *testing.T) {
+	bmcSrv := newFakeBMC(t, nil)
+	store := trusted(t, bmcSrv)
+	_ = store.SetConsent("127.0.0.1", false, true) // unencrypted channels were allowed once
+	var kvmTLS atomic.Bool
+	kvmTLS.Store(true)
+	v := &fakeVendor{}
+	vend := v.vendor()
+	vend.Probe = func(ctx context.Context, ep *bmc.Endpoint) ([]trust.ProbeResult, []string, error) {
+		if !kvmTLS.Load() {
+			return nil, []string{"KVM without TLS"}, nil
+		}
+		dial := func(ctx context.Context) (netConn, error) { return ep.DialPort(ctx, ep.HTTPSPort) }
+		r, err := trust.ProbeWithFallback(ctx, dial, ep.Host, "kvm")
+		return []trust.ProbeResult{r}, nil, err
+	}
+	d := &fakeDisplay{}
+	m := NewManager(Options{Trust: store, Display: d, Vendors: map[bmc.TargetType]*Vendor{bmc.TargetDell: vend}})
+
+	if _, err := m.Connect(context.Background(), req(bmcSrv.addr())); err != nil {
+		t.Fatal(err)
+	}
+	if dev, _ := store.Get("127.0.0.1"); !dev.KVMTLS {
+		t.Fatal("KVM TLS not remembered")
+	}
+	m.Disconnect()
+
+	kvmTLS.Store(false) // e.g. a MITM strips the TLS capability bit
+	_, err := m.Connect(context.Background(), req(bmcSrv.addr()))
+	var need *ConsentRequired
+	if !errors.As(err, &need) || len(need.InsecureChannels) == 0 || !strings.Contains(need.InsecureChannels[0], "offered TLS before") {
+		t.Fatalf("err = %v, want a downgrade warning despite the stored consent", err)
+	}
+	<-bmcSrv.passwords // the first connection's login
+	noPassword(t, bmcSrv)
+
+	r := req(bmcSrv.addr())
+	r.AllowInsecureChannels = true
+	if _, err := m.Connect(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if dev, _ := store.Get("127.0.0.1"); dev.KVMTLS {
+		t.Error("consented downgrade not recorded")
+	}
+}

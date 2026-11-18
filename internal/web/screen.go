@@ -142,6 +142,10 @@ func encodeRects(pix []byte, width int, rects []rect) []byte {
 
 // handleScreenshot serves the current picture as PNG.
 func (s *Server) handleScreenshot(w http.ResponseWriter, _ *http.Request) {
+	if s.bound() == nil {
+		http.Error(w, "no BMC is connected", http.StatusServiceUnavailable)
+		return
+	}
 	width, height, pix := s.screenSnapshot()
 	if pix == nil {
 		http.Error(w, "no video received yet", http.StatusServiceUnavailable)

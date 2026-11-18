@@ -39,7 +39,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 	vendor := filepath.Join(tmp, "vendor")
 	cmd := exec.Command("go", "mod", "vendor", "-o", vendor)
 	cmd.Stderr = os.Stderr

@@ -1,8 +1,10 @@
 // Package trust decides whether a BMC's TLS certificate is accepted, and remembers the decisions
 // the user made.
 //
-// A certificate is accepted when it chains to a trusted root for the name dialled (normal
-// verification), or when its SHA-256 fingerprint is pinned for the device. Anything else fails
+// A certificate is accepted when its SHA-256 fingerprint is pinned for the device, or, for a
+// device with no pin, when it chains to a trusted root for the name dialled (normal
+// verification). A pinned device presenting any other certificate, CA-signed or not, is a
+// change the user must confirm. Anything else fails
 // the handshake with an error that carries the certificate's details, so the caller can show
 // the fingerprint and ask the user. Nothing here ever accepts an unknown certificate silently:
 // pins are added only through Store.Trust or Store.Replace, which the caller invokes after the

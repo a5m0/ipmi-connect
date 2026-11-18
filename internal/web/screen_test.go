@@ -193,3 +193,16 @@ func TestSetFPSReportsInStatus(t *testing.T) {
 		t.Errorf("status %s lacks fps 35", rec.Body.String())
 	}
 }
+
+func TestAttachStartsFromABlankPicture(t *testing.T) {
+	srv := newTestServer(bmc.SessionState{})
+	srv.SetConsole(&fakeConsole{})
+	srv.UpdateScreen(2, 2, make([]byte, 16))
+	if _, _, pix := srv.screenSnapshot(); pix == nil {
+		t.Fatal("no picture")
+	}
+	srv.Attach(&fakeConsole{}, bmc.SessionState{Host: "other"})
+	if _, _, pix := srv.screenSnapshot(); pix != nil {
+		t.Error("the previous BMC's picture survived Attach")
+	}
+}

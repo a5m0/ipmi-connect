@@ -96,7 +96,48 @@ type consoleBinding struct {
 	console bmc.Console
 	ctx     context.Context
 	cancel  context.CancelFunc
-	wg      sync.WaitGroup
+
+	mu     sync.Mutex
+	users  int           // sockets and pastes using the console
+	closed bool          // detaching: no new users
+	idle   chan struct{} // closed when closed and users reaches zero
+}
+
+// acquire registers a user of the console; false once the binding is detaching, so nothing new
+// can start on a console that is being torn down.
+func (b *consoleBinding) acquire() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return false
+	}
+	b.users++
+	return true
+}
+
+func (b *consoleBinding) release() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.users--
+	if b.closed && b.users == 0 {
+		close(b.idle)
+	}
+}
+
+// shut refuses new users, cancels the binding and returns a channel closed once every user has
+// released the console.
+func (b *consoleBinding) shut() <-chan struct{} {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.closed {
+		b.closed = true
+		b.idle = make(chan struct{})
+		if b.users == 0 {
+			close(b.idle)
+		}
+	}
+	b.cancel()
+	return b.idle
 }
 
 // FilePicker asks the user to choose files with the desktop's native chooser. It returns the
@@ -139,8 +180,12 @@ func (s *Server) Attach(console bmc.Console, state bmc.SessionState) {
 	s.binding = b
 	s.bindMu.Unlock()
 	if old != nil {
-		old.cancel()
+		old.shut()
 	}
+	// The new BMC starts from a blank picture, never the previous one's.
+	s.screenMu.Lock()
+	s.screen, s.screenW, s.screenH = nil, 0, 0
+	s.screenMu.Unlock()
 	s.StateMu.Lock()
 	keepW, keepH := s.State.ScreenWidth, s.State.ScreenHeight
 	s.State = state
@@ -162,11 +207,8 @@ func (s *Server) Detach() {
 	s.binding = nil
 	s.bindMu.Unlock()
 	if b != nil {
-		b.cancel()
-		done := make(chan struct{})
-		go func() { b.wg.Wait(); close(done) }()
 		select {
-		case <-done:
+		case <-b.shut():
 		case <-time.After(detachTimeout):
 			log.Printf("[Server] Timed out waiting for browsers to release input")
 		}

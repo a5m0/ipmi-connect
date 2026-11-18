@@ -100,11 +100,16 @@ func (s *Server) handleTyping(ctx context.Context, b *consoleBinding, client *ws
 		in.releaseAll() // keys held in the browser would modify the typed text
 		tctx, tcancel := context.WithCancel(ctx)
 		*cancel = tcancel
+		if !b.acquire() {
+			s.typing.Store(false)
+			s.reply(client, map[string]any{"type": "typed", "id": msg.ID, "error": "the BMC session is ending"})
+			tcancel()
+			return
+		}
 		s.connWG.Add(1) // shutdown and Detach wait for the keys to be released
-		b.wg.Add(1)
 		go func() {
 			defer s.connWG.Done()
-			defer b.wg.Done()
+			defer b.release()
 			defer tcancel()
 			n, skipped, err := s.typeText(tctx, b.console, msg.Text)
 			s.typing.Store(false)

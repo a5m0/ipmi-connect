@@ -266,6 +266,17 @@ func (e *Endpoint) checkRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
+// PlainKVMAllowed reports whether a KVM channel without TLS may be used: unencrypted channels
+// are authorised and the KVM port has not been seen offering TLS before (which would make a
+// plain offer look like a downgrade attack).
+func (e *Endpoint) PlainKVMAllowed() bool {
+	if e.Policy.AllowInsecureChannels {
+		return true
+	}
+	d, _ := e.Policy.Store.Get(e.Policy.Device)
+	return d.InsecureChannels && !d.KVMTLS
+}
+
 // InsecureChannelsAllowed reports whether the user has authorised channels without effective
 // encryption (plain RFB, fixed-key RC4, APCP without TLS) for this device.
 func (e *Endpoint) InsecureChannelsAllowed() bool {

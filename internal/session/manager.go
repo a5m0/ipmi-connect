@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
 	"github.com/mhamzahkhan/ipmi-connect/internal/config"
@@ -30,6 +31,10 @@ const (
 	PhaseConnected     = "connected"
 	PhaseDisconnecting = "disconnecting"
 )
+
+// disconnectWait bounds how long Disconnect waits for a cancelled attempt to finish (a login
+// in flight times out after about ten seconds per request).
+const disconnectWait = 30 * time.Second
 
 // ErrBusy is returned while another connect or disconnect is in progress.
 var ErrBusy = errors.New("a connection attempt is already in progress")
@@ -138,6 +143,7 @@ type Manager struct {
 	mu      sync.Mutex
 	phase   string
 	cancel  context.CancelFunc
+	attempt chan struct{} // closed when the connection attempt in progress has finished
 	live    *Live
 	ep      *bmc.Endpoint
 	vendor  *Vendor
@@ -184,8 +190,11 @@ func (m *Manager) Connect(ctx context.Context, req Request) (Status, error) {
 	m.lastErr = ""
 	cctx, cancel := context.WithCancel(ctx)
 	m.cancel = cancel
+	attempt := make(chan struct{})
+	m.attempt = attempt
 	m.mu.Unlock()
 	defer cancel()
+	defer close(attempt) // after the result is recorded and any late session stopped
 
 	if prev != nil {
 		log.Printf("[Session] Disconnecting from %s before connecting to %s", prev.Host, req.Address)
@@ -194,13 +203,15 @@ func (m *Manager) Connect(ctx context.Context, req Request) (Status, error) {
 
 	live, ep, vendor, err := m.connect(cctx, req)
 
+	if err == nil && cctx.Err() != nil {
+		// Cancelled after the login succeeded: end that session before reporting.
+		live.Stop()
+		live, err = nil, errors.New("connection cancelled")
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.cancel = nil
-	if err == nil && cctx.Err() != nil {
-		err = errors.New("connection cancelled")
-		live.Stop()
-	}
 	if err != nil {
 		m.phase = PhaseIdle
 		var consent *ConsentRequired
@@ -226,8 +237,8 @@ func (m *Manager) Connect(ctx context.Context, req Request) (Status, error) {
 }
 
 // Disconnect cancels a connection attempt, or ends the session: browser input is released, the
-// vendor loops stop, virtual media is ejected and the BMC is logged out. It returns once done
-// (for an attempt in progress, once it has been told to stop).
+// vendor loops stop, virtual media is ejected and the BMC is logged out. It returns once done,
+// also for an attempt in progress (which may have to log out of a BMC it had just logged in to).
 func (m *Manager) Disconnect() {
 	m.mu.Lock()
 	switch m.phase {
@@ -235,7 +246,15 @@ func (m *Manager) Disconnect() {
 		if m.cancel != nil {
 			m.cancel()
 		}
+		attempt := m.attempt
 		m.mu.Unlock()
+		if attempt != nil {
+			select {
+			case <-attempt:
+			case <-time.After(disconnectWait):
+				log.Printf("[Session] The connection attempt did not stop within %v", disconnectWait)
+			}
+		}
 		return
 	case PhaseConnected:
 		live := m.live
@@ -372,8 +391,15 @@ func (m *Manager) establishTrust(ctx context.Context, ep *bmc.Endpoint, vendor *
 			need.LegacyTLS = append(need.LegacyTLS, fmt.Sprintf("%s (%s, %s)", r.Endpoint, r.Version, r.Cipher))
 		}
 	}
-	if len(results.insecure) > 0 && !ep.InsecureChannelsAllowed() && !req.AllowInsecureChannels {
+	dev, _ := m.opts.Trust.Get(ep.Policy.Device)
+	kvmTLS := results.kvmTLS
+	downgraded := results.kvmProbed && !kvmTLS && dev.KVMTLS
+	if len(results.insecure) > 0 && !req.AllowInsecureChannels && (downgraded || !ep.InsecureChannelsAllowed()) {
 		need.InsecureChannels = results.insecure
+		if downgraded {
+			need.InsecureChannels = append([]string{"WARNING: this BMC's KVM port offered TLS before and now does not. " +
+				"Someone may be stripping encryption from the connection."}, results.insecure...)
+		}
 	}
 	if len(need.Certificates) > 0 || len(need.LegacyTLS) > 0 || len(need.InsecureChannels) > 0 {
 		return need
@@ -400,6 +426,11 @@ func (m *Manager) establishTrust(ctx context.Context, ep *bmc.Endpoint, vendor *
 			log.Printf("[Trust] Pinned certificate %s for %s at the user's request", fp, device)
 		}
 	}
+	if kvmTLS != dev.KVMTLS && (kvmTLS || downgraded) {
+		if err := m.opts.Trust.SetKVMTLS(device, kvmTLS); err != nil {
+			return err
+		}
+	}
 	legacyNeeded := slices.ContainsFunc(results.tls, func(r trust.ProbeResult) bool { return r.Legacy })
 	if (req.AllowLegacyTLS && legacyNeeded) || (req.AllowInsecureChannels && len(results.insecure) > 0) {
 		if err := m.opts.Trust.SetConsent(device, req.AllowLegacyTLS && legacyNeeded, req.AllowInsecureChannels && len(results.insecure) > 0); err != nil {
@@ -415,8 +446,10 @@ func hasPins(s *trust.Store, device string) bool {
 }
 
 type probeResults struct {
-	tls      []trust.ProbeResult
-	insecure []string
+	tls       []trust.ProbeResult
+	insecure  []string
+	kvmProbed bool // the vendor's channel probe completed (its absence of TLS is meaningful)
+	kvmTLS    bool // the vendor's KVM port offered TLS
 }
 
 // probe learns the certificates of the web server and the vendor's TLS channels.
@@ -432,8 +465,13 @@ func (m *Manager) probe(ctx context.Context, ep *bmc.Endpoint, vendor *Vendor) (
 		extra, insecure, err := vendor.Probe(ctx, ep)
 		if err != nil {
 			log.Printf("[Session] Probing %s's %s channels: %v (checked again when they connect)", ep.Host, vendor.Name, err)
+		} else {
+			out.kvmProbed = true
 		}
 		for _, r := range extra {
+			if r.Endpoint == "kvm" {
+				out.kvmTLS = true
+			}
 			if !slices.ContainsFunc(out.tls, func(x trust.ProbeResult) bool {
 				return x.Cert.Fingerprint == r.Cert.Fingerprint && x.Legacy == r.Legacy
 			}) {
