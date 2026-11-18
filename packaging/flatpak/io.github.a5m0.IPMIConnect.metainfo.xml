@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.a5m0.IPMIConnect</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0 AND MPL-2.0</project_license>
+  <name>IPMI Connect</name>
+  <summary>Java-free remote console for legacy server BMCs</summary>
+  <developer id="io.github.a5m0">
+    <name>ipmi-connect contributors</name>
+  </developer>
+  <description>
+    <p>
+      IPMI Connect replaces the Java Web Start KVM consoles of older Dell (Avocent) and
+      Supermicro (ATEN) baseboard management controllers. It speaks their KVM and virtual media
+      protocols itself and shows the console in your web browser: video, keyboard, mouse, power
+      control and virtual media from local disk images.
+    </p>
+    <p>Security features:</p>
+    <ul>
+      <li>BMC certificates are verified, or pinned by SHA-256 fingerprint after you confirm them</li>
+      <li>Obsolete TLS and unencrypted BMC channels are used only after explicit consent, and shown in a persistent indicator</li>
+      <li>Passwords are never stored or logged</li>
+      <li>The local console listens on loopback only and requires a one-time sign-in link</li>
+    </ul>
+    <p>
+      These BMCs predate modern security: some channels cannot be encrypted. Use them only on a
+      dedicated, trusted management network.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.a5m0.IPMIConnect.desktop</launchable>
+  <url type="homepage">https://github.com/a5m0/ipmi-connect</url>
+  <url type="bugtracker">https://github.com/a5m0/ipmi-connect/issues</url>
+  <url type="vcs-browser">https://github.com/a5m0/ipmi-connect</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>The console showing a Linux host with a virtual CD attached</caption>
+      <image>https://raw.githubusercontent.com/a5m0/ipmi-connect/main/docs/images/console.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Virtual media with a disc image attached</caption>
+      <image>https://raw.githubusercontent.com/a5m0/ipmi-connect/main/docs/images/virtual-media.png</image>
+    </screenshot>
+  </screenshots>
+  <categories>
+    <category>Network</category>
+  </categories>
+  <keywords>
+    <keyword>IPMI</keyword>
+    <keyword>BMC</keyword>
+    <keyword>KVM</keyword>
+    <keyword>remote console</keyword>
+  </keywords>
+  <provides>
+    <binary>ipmi-connect</binary>
+  </provides>
+  <requires>
+    <internet>always</internet>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <branding>
+    <color type="primary" scheme_preference="light">#38bdf8</color>
+    <color type="primary" scheme_preference="dark">#12161f</color>
+  </branding>
+  <releases>
+    <release version="0.2.0" date="2026-10-18">
+      <description>
+        <p>Browser console for Dell C6220 II and Supermicro X8DTL-6F BMCs, with power control and virtual media.</p>
+      </description>
+    </release>
+  </releases>
+</component>
