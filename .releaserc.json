@@ -47,8 +47,12 @@
             "path": "dist/*.flatpak"
           },
           {
-            "path": "dist/*.cdx.json",
+            "path": "dist/ipmi-connect_*.cdx.json",
             "label": "SBOM (CycloneDX)"
+          },
+          {
+            "path": "dist/ipmi-connect-desktop_*.cdx.json",
+            "label": "SBOM, desktop build (CycloneDX)"
           },
           {
             "path": "dist/sha256sums.txt",
