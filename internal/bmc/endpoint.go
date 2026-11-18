@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/trust"
+	"github.com/a5m0/ipmi-connect/internal/trust"
 )
 
 // DefaultHTTPSPort is the BMC web server's port unless the address names another.

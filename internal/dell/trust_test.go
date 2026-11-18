@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/trust"
+	"github.com/a5m0/ipmi-connect/internal/trust"
 )
 
 // fakeTLSAPCP answers the APCP greeting offering TLS, upgrades with cert, and reports whatever

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/trust"
+	"github.com/a5m0/ipmi-connect/internal/trust"
 )
 
 func TestParseAddress(t *testing.T) {

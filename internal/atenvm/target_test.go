@@ -6,7 +6,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/vmedia"
+	"github.com/a5m0/ipmi-connect/internal/vmedia"
 )
 
 // memImage is an in-memory image that reports errors on demand.

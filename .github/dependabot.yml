@@ -1,0 +1,53 @@
+# Dependency updates. Security updates are on as well (Settings > Code security > Dependabot
+# security updates) and ignore the schedule and cooldown below.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: sunday
+      timezone: Europe/London
+    # A release must be this old before an update is proposed.
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: fix(deps)
+    labels: [dependencies, go]
+    groups:
+      go-minor-and-patch:
+        update-types: [minor, patch]
+    # Go module PRs change the Flatpak's offline sources. CI's "Flatpak module sources are
+    # current" check fails until someone runs `go run ./packaging/flatpak/gen-sources` on the
+    # branch and commits packaging/flatpak/go-modules.json and modules.txt.
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: sunday
+      timezone: Europe/London
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: ci
+    labels: [dependencies, github-actions]
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # The release tooling (semantic-release), locked in .github/release/package-lock.json.
+  - package-ecosystem: npm
+    directory: /.github/release
+    schedule:
+      interval: weekly
+      day: sunday
+      timezone: Europe/London
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+    labels: [dependencies, release-tooling]
+    groups:
+      semantic-release:
+        patterns: ["*"]

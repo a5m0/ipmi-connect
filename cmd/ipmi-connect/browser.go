@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/portal"
+	"github.com/a5m0/ipmi-connect/internal/portal"
 )
 
 // openBrowser shows url in the user's browser. In a Flatpak it asks the OpenURI portal; elsewhere

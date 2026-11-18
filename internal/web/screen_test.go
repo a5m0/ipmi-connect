@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/bmc"
 )
 
 func solid(w, h int, v byte) []byte {

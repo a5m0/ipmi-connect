@@ -1,6 +1,6 @@
 package session
 
-import "github.com/mhamzahkhan/ipmi-connect/internal/dell"
+import "github.com/a5m0/ipmi-connect/internal/dell"
 
 // frameAssembler joins ib chunks into whole ASPEED frames. A frame starts with a chunk whose
 // first-chunk flag is set; continuation chunks extend it. Chunks that arrive with no frame in

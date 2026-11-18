@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/bmc"
 )
 
 const (
@@ -158,7 +158,7 @@ func (w *WebSession) PowerCGI(action bmc.PowerAction) error {
 	if !strings.Contains(body, "POWER_INFO") {
 		return errors.New("supermicro power: unexpected reply (web session expired?)")
 	}
-	log.Printf("[Supermicro] Power %s sent", action)
+	log.Printf("[Supermicro] Power %q sent", action)
 	return nil
 }
 

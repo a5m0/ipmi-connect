@@ -3,7 +3,7 @@ package dell
 import (
 	"testing"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/bmc"
 )
 
 func TestPwStateCode(t *testing.T) {

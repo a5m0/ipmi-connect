@@ -11,9 +11,9 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
-	"github.com/mhamzahkhan/ipmi-connect/internal/session"
-	"github.com/mhamzahkhan/ipmi-connect/internal/web"
+	"github.com/a5m0/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/session"
+	"github.com/a5m0/ipmi-connect/internal/web"
 )
 
 // connectCLI connects to the host on the command line. Trust decisions come from flags or, on a

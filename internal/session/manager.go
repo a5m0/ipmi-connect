@@ -19,9 +19,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
-	"github.com/mhamzahkhan/ipmi-connect/internal/config"
-	"github.com/mhamzahkhan/ipmi-connect/internal/trust"
+	"github.com/a5m0/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/config"
+	"github.com/a5m0/ipmi-connect/internal/trust"
 )
 
 // Phases of the manager.

@@ -24,7 +24,7 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "./scripts/build-release.sh ${nextRelease.version}"
+        "verifyReleaseCmd": "[ \"$EXPECTED_VERSION\" = next-version-dry-run ] || [ \"${nextRelease.version}\" = \"$EXPECTED_VERSION\" ] || { echo \"semantic-release wants ${nextRelease.version}, but '$EXPECTED_VERSION' was built\" >&2; exit 1; }"
       }
     ],
     [
@@ -58,7 +58,10 @@
             "path": "dist/sha256sums.txt",
             "label": "SHA256 Checksums"
           }
-        ]
+        ],
+        "successComment": false,
+        "failComment": false,
+        "releasedLabels": false
       }
     ]
   ]

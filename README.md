@@ -118,7 +118,7 @@ on hardware.
 You need Go 1.27.2 or newer (builds use the 1.27.4 toolchain named in `go.mod`).
 
 ```bash
-go install github.com/mhamzahkhan/ipmi-connect/cmd/ipmi-connect@latest
+go install github.com/a5m0/ipmi-connect/cmd/ipmi-connect@latest
 ```
 
 Or `make build` in a clone, which writes `bin/ipmi-connect`. The Flatpak build is described in
