@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>IPMI Console</title>
+  <title>IPMI Connect</title>
+  <meta name="referrer" content="no-referrer">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -26,6 +28,7 @@
           <span class="server-target" id="serverTarget">Connecting...</span>
           <span class="badge badge-vendor" id="vendorBadge">IPMI</span>
           <span class="power-pill" id="powerPill" title="Host power state">Power ?</span>
+          <button class="security-badge" id="securityBadge" title="How the connection to the BMC is protected" hidden>Security</button>
         </div>
       </div>
 
@@ -84,6 +87,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
         </button>
 
+        <button class="btn" id="btnDisconnect" title="Log out of the BMC and return to the connection manager">
+          <span>Disconnect</span>
+        </button>
+
         <!-- Screenshot Button -->
         <button class="btn btn-icon" id="btnScreenshot" title="Capture Screenshot">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
@@ -131,11 +138,98 @@
         <canvas id="screenCanvas" width="1024" height="768"></canvas>
         <div class="canvas-overlay" id="connectingOverlay">
           <div class="spinner"></div>
-          <div class="overlay-text" id="overlayStatus">Establishing secure BMC console link...</div>
-          <div class="overlay-subtext" id="overlaySubtext">Negotiating TLS and protocol handshakes</div>
+          <div class="overlay-text" id="overlayStatus">Connecting to the BMC console…</div>
+          <div class="overlay-subtext" id="overlaySubtext">Waiting for video</div>
         </div>
       </div>
     </main>
+
+    <!-- Connection manager: shown whenever no BMC is connected -->
+    <section class="connect-view" id="connectView" hidden>
+      <div class="connect-card">
+        <div class="connect-head">
+          <h2>Connect to a BMC</h2>
+          <span class="connect-version" id="appVersion"></span>
+        </div>
+        <form class="connect-form" id="connectForm" autocomplete="off">
+          <label>Address <input type="text" id="cAddress" placeholder="192.0.2.10 or bmc.example" spellcheck="false" autocomplete="off" required></label>
+          <div class="connect-row">
+            <label>User <input type="text" id="cUser" value="root" spellcheck="false" autocomplete="off" required></label>
+            <label>Password <input type="password" id="cPassword" autocomplete="off" data-lpignore="true" data-1p-ignore required></label>
+          </div>
+          <div class="connect-row">
+            <label>Type
+              <select id="cVendor">
+                <option value="auto">Detect automatically</option>
+                <option value="dell">Dell (Avocent)</option>
+                <option value="supermicro">Supermicro (ATEN)</option>
+              </select>
+            </label>
+            <label class="media-check connect-save"><input type="checkbox" id="cSave"> Save as a profile (never the password)</label>
+          </div>
+          <p class="connect-note">The password is used for this session only. It is not stored or logged.</p>
+          <p class="connect-error" id="connectError" role="alert" hidden></p>
+          <div class="connect-actions">
+            <button type="submit" class="btn btn-primary" id="btnConnect">Connect</button>
+            <button type="button" class="btn btn-secondary" id="btnCancelConnect" hidden>Cancel</button>
+          </div>
+        </form>
+
+        <div class="connect-lists">
+          <div>
+            <h4 class="media-heading">Saved devices</h4>
+            <ul class="connect-list" id="profileList"></ul>
+          </div>
+          <div>
+            <h4 class="media-heading">Recent <button type="button" class="link-button" id="btnClearRecents">clear</button></h4>
+            <ul class="connect-list" id="recentList"></ul>
+          </div>
+        </div>
+        <details class="connect-trust">
+          <summary>Trusted certificates and permissions</summary>
+          <ul class="connect-list" id="trustList"></ul>
+        </details>
+        <div class="connect-footer">
+          <span class="connect-note">Use a dedicated management network: these BMCs predate modern security.</span>
+          <button type="button" class="btn btn-secondary" id="btnQuit" hidden>Quit ipmi-connect</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Consent: certificates and obsolete protocols the user must decide on -->
+    <div class="modal-backdrop" id="consentModal">
+      <div class="modal-card modal-lg">
+        <div class="modal-header">
+          <div class="modal-title"><h3 id="consentTitle">Confirm this BMC</h3></div>
+          <button class="btn-close" id="btnCloseConsent">&times;</button>
+        </div>
+        <div class="modal-body consent-body" id="consentBody"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="btnConsentCancel">Cancel</button>
+          <button class="btn btn-danger" id="btnConsentAccept" disabled>Trust and Connect</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Connection security details -->
+    <div class="modal-backdrop" id="securityModal">
+      <div class="modal-card modal-lg">
+        <div class="modal-header">
+          <div class="modal-title"><h3>Connection Security</h3></div>
+          <button class="btn-close" id="btnCloseSecurity">&times;</button>
+        </div>
+        <div class="modal-body">
+          <table class="media-table">
+            <thead><tr><th>Channel</th><th>Encryption</th><th>Authentication</th><th>Details</th></tr></thead>
+            <tbody id="securityRows"></tbody>
+          </table>
+          <p class="modal-description">Encryption says whether the traffic is protected; authentication says whether the BMC's identity was checked (a CA-verified or pinned certificate). Neither the local console nor a Flatpak sandbox makes an unencrypted BMC channel safe: keep BMCs on a dedicated management network.</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="btnSecurityDone">Close</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Power Confirmation Modal -->
     <div class="modal-backdrop" id="mediaModal">
@@ -151,7 +245,8 @@
           <form class="media-add" id="mediaAddForm">
             <input type="text" class="media-input" id="mediaPath" placeholder="/full/path/to/image.iso or .img" spellcheck="false" autocomplete="off">
             <button type="button" class="btn btn-secondary" id="btnBrowseImage">Browse…</button>
-            <label class="media-check"><input type="checkbox" id="mediaAddReadOnly"> Read-only</label>
+            <button type="button" class="btn btn-secondary" id="btnPickNative" title="Choose a file with the desktop's file chooser" hidden>Choose File…</button>
+            <label class="media-check" title="Off: the host can only read the image"><input type="checkbox" id="mediaAddWritable"> Writable</label>
             <button type="submit" class="btn btn-secondary">Add Image</button>
           </form>
 
@@ -233,7 +328,7 @@
         <div class="modal-body">
           <div class="picker-bar">
             <button class="btn btn-secondary" id="pickerUp" title="Parent folder">↑</button>
-            <button class="btn btn-secondary" id="pickerHome" title="Home folder">Home</button>
+            <select id="pickerRoots" title="Folders ipmi-connect may use"></select>
             <span class="picker-path" id="pickerPath"></span>
           </div>
           <ul class="picker-list" id="pickerList"></ul>

@@ -75,7 +75,13 @@ export function setupMedia(apiFetch) {
     const ro = el('input', { type: 'checkbox', checked: img.read_only });
     ro.disabled = img.kind === 'iso' || Boolean(img.mapped_to);
     ro.title = img.kind === 'iso' ? 'ISO images are always read-only' : 'Change while not mapped';
-    ro.addEventListener('change', () => act('PATCH', `/api/media/images/${encodeURIComponent(img.id)}`, { read_only: ro.checked }));
+    ro.addEventListener('change', () => {
+      if (!ro.checked && !window.confirm(`Let the host write to ${img.name}? It can change or erase everything in the image.`)) {
+        ro.checked = true;
+        return;
+      }
+      act('PATCH', `/api/media/images/${encodeURIComponent(img.id)}`, { read_only: ro.checked, confirm_writable: !ro.checked });
+    });
 
     const drive = el('td');
     const actions = el('td', { className: 'actions' });
@@ -182,7 +188,7 @@ export function setupMedia(apiFetch) {
       imagesKey = key;
       imagesBody.replaceChildren(...(st.images.length
         ? st.images.map(imageRow)
-        : [el('tr', {}, el('td', { colSpan: 5, className: 'empty', textContent: 'No images yet: add an .iso or .img by its full path.' }))]));
+        : [el('tr', {}, el('td', { colSpan: 5, className: 'empty', textContent: 'No images yet: browse for an .iso or .img. Images are read-only unless you make them writable.' }))]));
     }
     drivesBody.replaceChildren(...TARGETS.map(driveRow));
     drawGraph(st.history || []);
@@ -192,7 +198,7 @@ export function setupMedia(apiFetch) {
   async function poll() {
     try {
       const resp = await apiFetch('/api/media');
-      if (resp.status === 501) { stop(); return; } // this BMC has no virtual media
+      if (resp.status === 501) { stop(); button.hidden = true; return; } // no virtual media (or no BMC)
       button.hidden = false;
       if (resp.ok) render(await resp.json());
     } catch (e) {
@@ -235,7 +241,9 @@ export function setupMedia(apiFetch) {
     const input = document.getElementById('mediaPath');
     const path = input.value.trim();
     if (!path) return;
-    act('POST', '/api/media/images', { path, read_only: document.getElementById('mediaAddReadOnly').checked })
+    const writable = document.getElementById('mediaAddWritable').checked;
+    if (writable && !window.confirm('Add the image writable? The host can change or erase everything in it.')) return;
+    act('POST', '/api/media/images', { path, read_only: !writable, confirm_writable: writable })
       .then(() => { if (errorLine.hidden) input.value = ''; });
   });
   const createForm = document.getElementById('mediaCreateForm');
@@ -247,6 +255,21 @@ export function setupMedia(apiFetch) {
     sizeSelect.hidden = fromFolder;
     folderInput.hidden = !fromFolder;
     browseFolder.hidden = !fromFolder;
+  });
+  // The desktop's own file chooser (xdg-desktop-portal): in a Flatpak, the way to reach files
+  // outside the sandbox. The server answers 501 when there is no portal.
+  const pickNative = document.getElementById('btnPickNative');
+  pickNative.hidden = false;
+  pickNative.addEventListener('click', async () => {
+    showError('Choose a file in the window that opened on your desktop…');
+    try {
+      const res = await call('POST', '/api/media/pick', { directory: false });
+      if (res.paths && res.paths.length) document.getElementById('mediaPath').value = res.paths[0];
+      showError('');
+    } catch (e) {
+      if (/no desktop file chooser/.test(e.message)) pickNative.hidden = true;
+      showError(e.message);
+    }
   });
   document.getElementById('btnBrowseImage').addEventListener('click', async () => {
     const path = await pick('file', 'Choose an image (.iso or .img)');
@@ -277,4 +300,8 @@ export function setupMedia(apiFetch) {
 
   poll();
   schedule();
+  return {
+    // refresh restarts polling after a (re)connection: a BMC without virtual media stops it.
+    refresh() { imagesKey = ''; button.hidden = true; poll(); schedule(); },
+  };
 }
