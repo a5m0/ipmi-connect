@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -16,6 +17,9 @@ const maxClientMessage = 6*maxTypeRunes + 1024 // JSON escapes a character as up
 // statusSessionEnded tells the page that the BMC session it was showing has ended (disconnect),
 // so it goes back to the connection manager instead of reconnecting the socket.
 const statusSessionEnded websocket.StatusCode = 4000
+
+// closeGrace bounds the wait for a browser to answer the close handshake.
+const closeGrace = time.Second
 
 // handleWS streams video to one browser and forwards its input to the attached console. The
 // guard has already checked the Host, the Origin and the single-use ticket; Accept checks the
@@ -43,16 +47,31 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(maxClientMessage)
 
-	// Not r.Context(): the request is hijacked, so its context does not track the socket. The
-	// binding's context ends on disconnect, logout and shutdown.
+	defer func() { _ = conn.CloseNow() }()
+
+	// Not r.Context(): the request is hijacked, so its context does not track the socket. ctx
+	// ends on disconnect and shutdown (the binding) or logout (client.close). Reads use their
+	// own context, because cancelling a read's context drops the connection without a close
+	// frame; the watcher below sends one saying why, which also ends the read.
 	ctx, cancel := context.WithCancel(b.ctx)
 	defer cancel()
-	defer func() {
+	readCtx, readCancel := context.WithCancel(context.Background())
+	defer readCancel()
+	go func() {
+		<-ctx.Done()
+		code, reason := websocket.StatusPolicyViolation, "signed out"
 		if b.ctx.Err() != nil {
-			_ = conn.Close(statusSessionEnded, "session ended")
-			return
+			code, reason = statusSessionEnded, "session ended"
 		}
-		_ = conn.CloseNow()
+		// Held input is released when the read loop ends: wait for the close handshake only
+		// briefly, so an unresponsive browser cannot delay that (or Detach).
+		closed := make(chan struct{})
+		go func() { _ = conn.Close(code, reason); close(closed) }()
+		select {
+		case <-closed:
+		case <-time.After(closeGrace):
+		}
+		readCancel()
 	}()
 
 	client := newWSClient(cancel)
@@ -83,7 +102,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	for {
-		typ, data, err := conn.Read(ctx)
+		typ, data, err := conn.Read(readCtx)
 		if err != nil {
 			return
 		}
