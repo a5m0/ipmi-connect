@@ -2,11 +2,14 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"fmt"
 	"image"
 	"image/png"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -140,27 +143,61 @@ func encodeRects(pix []byte, width int, rects []rect) []byte {
 	return msg
 }
 
-// handleScreenshot serves the current picture as PNG.
-func (s *Server) handleScreenshot(w http.ResponseWriter, _ *http.Request) {
+// screenshotPNG encodes the current picture. The status and message describe why there is none.
+func (s *Server) screenshotPNG() ([]byte, int, string) {
 	if s.bound() == nil {
-		http.Error(w, "no BMC is connected", http.StatusServiceUnavailable)
-		return
+		return nil, http.StatusServiceUnavailable, "no BMC is connected"
 	}
 	width, height, pix := s.screenSnapshot()
 	if pix == nil {
-		http.Error(w, "no video received yet", http.StatusServiceUnavailable)
-		return
+		return nil, http.StatusServiceUnavailable, "no video received yet"
 	}
 	img := &image.NRGBA{Pix: pix, Stride: width * 4, Rect: image.Rect(0, 0, width, height)}
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
 		log.Printf("[Server] Screenshot: %v", err)
-		http.Error(w, "encoding failed", http.StatusInternalServerError)
+		return nil, http.StatusInternalServerError, "encoding failed"
+	}
+	return buf.Bytes(), http.StatusOK, ""
+}
+
+// handleScreenshot serves the current picture as PNG.
+func (s *Server) handleScreenshot(w http.ResponseWriter, _ *http.Request) {
+	data, code, msg := s.screenshotPNG()
+	if data == nil {
+		http.Error(w, msg, code)
 		return
 	}
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(buf.Bytes())
+	_, _ = w.Write(data)
+}
+
+// handleScreenshotSave asks where to save the current picture with the native Save dialog and
+// writes it there. Embedded webviews don't save <a download> links (WebKitGTK drops them
+// silently), so the desktop window saves through Go instead. The picture comes from the server's
+// own copy of the screen, so the page sends nothing but the request.
+func (s *Server) handleScreenshotSave(w http.ResponseWriter, r *http.Request) {
+	if s.SaveFile == nil {
+		writeJSONError(w, http.StatusNotImplemented, badRequest("no native Save dialog is available"))
+		return
+	}
+	data, code, msg := s.screenshotPNG()
+	if data == nil {
+		writeJSONError(w, code, badRequest(msg))
+		return
+	}
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Now().Add(pickTimeout + 10*time.Second))
+	ctx, cancel := context.WithTimeout(r.Context(), pickTimeout)
+	defer cancel()
+	name := fmt.Sprintf("ipmi-console-%s.png", time.Now().Format("20060102-150405"))
+	path, err := s.SaveFile(ctx, "Save screenshot", name, data)
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"path": path, "saved": path != ""})
 }
 
 // attachClient registers a browser and queues the current picture for it in one step under

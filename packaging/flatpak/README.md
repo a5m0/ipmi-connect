@@ -2,13 +2,13 @@
 
 | File | Purpose |
 | :--- | :--- |
-| `io.github.a5m0.IPMIConnect.yml` | Manifest: Freedesktop 26.08 runtime, golang SDK extension, network permission only |
+| `io.github.a5m0.IPMIConnect.yml` | Manifest: GNOME 51 runtime (for WebKitGTK), golang SDK extension, network and display permissions |
 | `go-modules.json`, `modules.txt` | Offline Go module sources (module zips from proxy.golang.org, pinned by SHA-256) and the vendor manifest |
 | `gen-sources/` | Regenerates the two files above: `go run ./packaging/flatpak/gen-sources` |
 | `io.github.a5m0.IPMIConnect.desktop` | Launcher: `ipmi-connect --desktop` |
 | `io.github.a5m0.IPMIConnect.metainfo.xml` | AppStream metadata |
 | `io.github.a5m0.IPMIConnect.svg` | Icon |
-| `smoke-test.sh` | Checks an installed build: sign-in, API, confinement, quit |
+| `smoke-test.sh` | Checks an installed build: sign-in, API, confinement, quit, and the window under Xvfb when available |
 
 Permissions and their limits are explained in [docs/security/sandbox.md](../../docs/security/sandbox.md).
 
@@ -19,7 +19,7 @@ flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/fl
 ```
 
 ```bash
-flatpak install --user flathub org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08 org.freedesktop.Sdk.Extension.golang//26.08
+flatpak install --user flathub org.gnome.Platform//51 org.gnome.Sdk//51 org.freedesktop.Sdk.Extension.golang//26.08
 ```
 
 ```bash
@@ -84,7 +84,7 @@ Not submitted. Before a submission:
   component, and it matches the repository) or ask the reviewers for an exception. Changing the
   ID later moves users' configuration (`~/.var/app/<id>`), so decide before the first public
   release.
-- **Console software.** Flathub states that console software is not accepted. ipmi-connect has a
-  graphical UI, but in the user's browser rather than its own window; reviewers may weigh that.
+- **Console software.** Flathub states that console software is not accepted. The Flatpak now
+  shows its UI in its own window, which settles that concern.
 - Flathub builds from a `git` source pinned to a tag and commit, not the `dir` source used here.
 - The `network` permission is required; the metainfo declares it (`<requires><internet>always</internet></requires>`).

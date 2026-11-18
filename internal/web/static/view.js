@@ -1,4 +1,5 @@
-// Screen scaling, fullscreen with keyboard lock, and a guard against closing the tab by accident.
+// Screen scaling, fullscreen with keyboard lock, and guards against leaving the console by
+// accident (closing the tab, dropping a file on it).
 
 const MODE_KEY = 'ipmi-connect-scale';
 const MODES = ['fit', '1:1', 'integer'];
@@ -68,6 +69,15 @@ export function setupView(canvas, viewport, isConnected) {
   window.addEventListener('beforeunload', (e) => {
     if (isConnected()) e.preventDefault();
   });
+
+  // Dropping a file or link anywhere would make the browser (or the desktop window) navigate
+  // to it, leaving the console. Nothing in the page takes drops, so refuse them all.
+  for (const type of ['dragover', 'drop']) {
+    window.addEventListener(type, (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+    });
+  }
 
   apply();
 }

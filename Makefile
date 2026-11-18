@@ -13,7 +13,7 @@ build:
 # Spike: the console in a native Wails window (GTK4 + WebKitGTK 6.0, loaded at run time, so no
 # cgo). See docs/design/wails-spike.md.
 desktop:
-	CGO_ENABLED=0 go build -tags desktop,purego -o bin/ipmi-connect-desktop ./cmd/ipmi-connect
+	CGO_ENABLED=0 go build -tags desktop,purego,production -o bin/ipmi-connect-desktop ./cmd/ipmi-connect
 
 test:
 	go test -race ./...

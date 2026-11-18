@@ -5,9 +5,10 @@ Status: implemented; protocol-facing behaviour still needs hardware validation (
 
 ## Goals and constraints
 
-- One statically linked Go executable with the web UI embedded; the user's own browser is the
-  UI. No Electron, Tauri, embedded browser, Java, Python, Node.js runtime, WebAssembly or
-  remote service.
+- One Go executable with the web UI embedded. The plain build is statically linked and the
+  user's own browser is the UI; the `desktop` build (used by the Flatpak) shows the same UI in a
+  native WebKit window through Wails, still without cgo (see [wails-spike.md](wails-spike.md)).
+  No Electron, Tauri, Java, Python, Node.js runtime, WebAssembly or remote service.
 - Usable without a terminal: a desktop launcher opens a connection manager.
 - The existing CLI (`ipmi-connect <host>`) keeps working for scripts.
 - Security first: no credential leaves the process before the BMC is trusted; obsolete
@@ -109,7 +110,8 @@ token and closes sockets; method-restricted routes; 4 KiB JSON bodies; 32 concur
 
 | Environment | How |
 | :--- | :--- |
-| Flatpak | OpenURI portal over the session bus, then `xdg-open` (portal-backed in the runtime) |
+| `desktop` build, desktop mode (the Flatpak) | Its own window; the link goes to it in memory. `--no-browser` prints it instead |
+| Flatpak, CLI mode | OpenURI portal over the session bus, then `xdg-open` (portal-backed in the runtime) |
 | Linux / BSD | `xdg-open <url>` |
 | macOS | `open <url>` |
 | Always | the link is printed; pressing Enter on a terminal prints and opens a fresh one |

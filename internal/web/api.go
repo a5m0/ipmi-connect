@@ -17,12 +17,13 @@ type statusResponse struct {
 	LastError   string `json:"last_error,omitempty"`
 	Version     string `json:"version"`
 	Desktop     bool   `json:"desktop"`
+	SaveDialog  bool   `json:"save_dialog"` // screenshots go through POST /api/screenshot/save
 	IdleTimeout int    `json:"idle_timeout_seconds,omitempty"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.StateMu.RLock()
-	resp := statusResponse{SessionState: s.State, Version: s.Version, Desktop: s.Desktop, IdleTimeout: int(s.IdleTimeout / time.Second)}
+	resp := statusResponse{SessionState: s.State, Version: s.Version, Desktop: s.Desktop, SaveDialog: s.SaveFile != nil, IdleTimeout: int(s.IdleTimeout / time.Second)}
 	s.StateMu.RUnlock()
 	resp.Phase = session.PhaseIdle
 	if s.bound() != nil {
