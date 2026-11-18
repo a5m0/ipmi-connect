@@ -66,7 +66,7 @@ func newFakeWeb(t *testing.T, f *fakeBMCWeb) *WebSession {
 	t.Helper()
 	srv := httptest.NewTLSServer(f)
 	t.Cleanup(srv.Close)
-	ws := NewWebSession(srv.Listener.Addr().String(), "ADMIN", "pw")
+	ws := NewWebSession(testEndpoint(t, srv.Listener.Addr().String(), srv.Certificate()), "ADMIN", "pw")
 	ws.ticketRetryDelay = 0
 	return ws
 }

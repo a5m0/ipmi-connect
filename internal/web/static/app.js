@@ -1,5 +1,6 @@
 // ipmi-connect browser console
 import { KEY_TO_HID } from '/keymap.js';
+import { setupConnect } from '/connect.js';
 import { setupMedia } from '/media.js';
 import { setupPaste } from '/paste.js';
 import { toast } from '/toast.js';
@@ -49,13 +50,19 @@ import { setupView } from '/view.js';
 
   // Initialize
   // Session: the launch link carries a one-time code in its fragment (#c=...), exchanged once for
-  // the per-run token. localStorage is per origin, and the origin includes the port, so other
-  // localhost services cannot read it (unlike cookies, which browsers share across ports).
+  // the per-run token. The token is kept in memory and sessionStorage, which is per tab and per
+  // origin (the port included), so a reload stays signed in but closing the tab ends it; it is
+  // never put in localStorage or a cookie (browsers share 127.0.0.1 cookies across ports).
   const TOKEN_KEY = 'ipmi-connect-token';
   let sessionToken = null;
   let signedOut = false;
+  let connectView = null; // the connection manager
+  let media = null;       // the virtual media panel
+  let phase = '';         // the server's session phase
+  let sessionEnded = false; // the server said the console socket is ending on purpose
 
   async function ensureSession() {
+    try { localStorage.removeItem(TOKEN_KEY); } catch (e) { /* older versions kept it there */ }
     const match = window.location.hash.match(/[#&]c=([0-9a-f]+)/);
     if (match) {
       history.replaceState(null, '', window.location.pathname); // drop the code from the address bar
@@ -66,47 +73,92 @@ import { setupView } from '/view.js';
       });
       if (resp.ok) {
         sessionToken = (await resp.json()).token;
-        try { localStorage.setItem(TOKEN_KEY, sessionToken); } catch (e) { /* private mode: token lives for this tab */ }
+        try { sessionStorage.setItem(TOKEN_KEY, sessionToken); } catch (e) { /* the token lives in memory */ }
         return true;
       }
+      overlaySubtext.textContent = (await resp.text()).trim();
     }
-    try { sessionToken = localStorage.getItem(TOKEN_KEY); } catch (e) { sessionToken = null; }
+    try { sessionToken = sessionStorage.getItem(TOKEN_KEY); } catch (e) { sessionToken = null; }
     return !!sessionToken;
   }
 
-  function showSignedOut() {
+  function showSignedOut(message) {
     signedOut = true;
+    sessionToken = null;
+    try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) { /* ignore */ }
+    if (ws) ws.close();
+    if (connectView) connectView.hide();
     statusDot.className = 'status-dot';
     connectingOverlay.classList.remove('hidden');
     overlayStatus.textContent = 'Not signed in';
-    overlaySubtext.textContent = 'Open the console link printed in the terminal (each link works once).';
+    overlaySubtext.textContent = message || 'Open the console again from the ipmi-connect app or terminal (each link works once).';
   }
 
   async function apiFetch(path, options = {}) {
     const headers = Object.assign({}, options.headers, { Authorization: `Bearer ${sessionToken}` });
-    const resp = await fetch(path, Object.assign({}, options, { headers }));
-    if (resp.status === 401) {
-      try { localStorage.removeItem(TOKEN_KEY); } catch (e) { /* ignore */ }
-      showSignedOut();
-    }
+    const resp = await fetch(path, Object.assign({ cache: 'no-store', credentials: 'omit' }, options, { headers }));
+    if (resp.status === 401) showSignedOut();
     return resp;
   }
 
   async function init() {
     if (!(await ensureSession())) {
-      showSignedOut();
+      showSignedOut(overlaySubtext.textContent);
       return;
     }
-    setupWebSocket();
+    connectView = setupConnect(apiFetch, pollStatus);
     setupMouseAndKeyboard();
     setupPowerButtons();
     setupMacros();
-    setupMedia(apiFetch);
+    setupSessionButtons();
+    media = setupMedia(apiFetch);
     paste = setupPaste(sendMessage);
     setupView(canvas, document.getElementById('viewport'), () => isConnected);
     setupFullscreenAndScreenshot();
     pollStatus();
     setInterval(pollStatus, 3000);
+  }
+
+  // Session buttons: Disconnect ends the BMC session; Quit stops the app (desktop mode).
+  function setupSessionButtons() {
+    document.getElementById('btnDisconnect').addEventListener('click', async () => {
+      if (!window.confirm('Disconnect from the BMC? Virtual media is ejected and the BMC session is logged out.')) return;
+      await apiFetch('/api/disconnect', { method: 'POST' });
+      pollStatus();
+    });
+    document.getElementById('btnQuit').addEventListener('click', async () => {
+      if (!window.confirm('Quit ipmi-connect? Any BMC session is logged out first.')) return;
+      await apiFetch('/api/shutdown', { method: 'POST' });
+      showSignedOut('ipmi-connect has quit. You can close this tab.');
+    });
+    const modal = document.getElementById('securityModal');
+    document.getElementById('securityBadge').addEventListener('click', () => modal.classList.add('open'));
+    for (const id of ['btnCloseSecurity', 'btnSecurityDone']) {
+      document.getElementById(id).addEventListener('click', () => modal.classList.remove('open'));
+    }
+  }
+
+  const ENCRYPTION = { tls: 'TLS', 'legacy-tls': 'Obsolete TLS', weak: 'Weak (treat as none)', none: 'None' };
+  const AUTH = { ca: 'CA-verified certificate', pinned: 'Pinned certificate', none: 'None' };
+  const LEVEL = { secure: 'Encrypted', legacy: 'Obsolete TLS', insecure: 'Unencrypted channels' };
+
+  // showSecurity keeps the header badge and the details table in step with the session.
+  function showSecurity(data) {
+    const badge = document.getElementById('securityBadge');
+    const level = data.security_level || '';
+    badge.hidden = !level;
+    badge.className = `security-badge ${level}`;
+    badge.textContent = LEVEL[level] || 'Security';
+    const rows = (data.channels || []).map((c) => {
+      const tr = document.createElement('tr');
+      const cell = (text, cls) => { const td = document.createElement('td'); td.textContent = text || ''; if (cls) td.className = cls; tr.append(td); };
+      cell(c.channel);
+      cell(ENCRYPTION[c.encryption] || c.encryption, `enc-${c.encryption}`);
+      cell(AUTH[c.auth] || c.auth);
+      cell([c.protocol, c.cipher, c.note, c.fingerprint ? `SHA-256 ${c.fingerprint}` : ''].filter(Boolean).join(' · '), 'mono small');
+      return tr;
+    });
+    document.getElementById('securityRows').replaceChildren(...rows);
   }
 
   // Poll status API
@@ -116,6 +168,21 @@ import { setupView } from '/view.js';
       const resp = await apiFetch('/api/status');
       if (!resp.ok) return;
       const data = await resp.json();
+
+      // No BMC: the connection manager; a BMC: the console and its socket.
+      const was = phase;
+      phase = data.phase;
+      if (phase === 'connected') {
+        connectView.hide();
+        if (was !== 'connected') {
+          if (!ws || ws.readyState > WebSocket.OPEN) setupWebSocket();
+          media.refresh();
+        }
+      } else {
+        connectView.show(data);
+        if (ws && ws.readyState <= WebSocket.OPEN) ws.close();
+      }
+      showSecurity(data);
 
       serverTarget.textContent = data.host || '127.0.0.1';
       vendorBadge.textContent = (data.target_type || 'IPMI').toUpperCase();
@@ -163,10 +230,21 @@ import { setupView } from '/view.js';
     setTimeout(tick, 1000);
   }
 
-  // WebSocket Setup
-  function setupWebSocket() {
+  // WebSocket Setup. The socket URL carries a single-use ticket that expires in seconds, never
+  // the session token: URLs end up in more places than headers do.
+  async function setupWebSocket() {
+    if (signedOut || phase !== 'connected') return;
+    let ticket;
+    try {
+      const resp = await apiFetch('/api/ws-ticket', { method: 'POST' });
+      if (!resp.ok) { if (!signedOut) setTimeout(setupWebSocket, 3000); return; }
+      ticket = (await resp.json()).ticket;
+    } catch (e) {
+      setTimeout(setupWebSocket, 3000);
+      return;
+    }
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${proto}//${window.location.host}/ws?t=${encodeURIComponent(sessionToken)}`;
+    const wsUrl = `${proto}//${window.location.host}/ws?ticket=${encodeURIComponent(ticket)}`;
 
     ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
@@ -181,15 +259,21 @@ import { setupView } from '/view.js';
       }, 500);
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (paste) paste.reset();
       if (signedOut) return;
+      if (sessionEnded) { // disconnected or signed out: the status poll decides what to show
+        sessionEnded = false;
+        isConnected = false;
+        pollStatus();
+        return;
+      }
       isConnected = false;
       statusDot.className = 'status-dot';
       connectingOverlay.classList.remove('hidden');
       overlayStatus.textContent = 'Connection Closed';
       overlaySubtext.textContent = 'Attempting to reconnect in 3s...';
-      if (!signedOut) setTimeout(setupWebSocket, 3000);
+      if (!signedOut) setTimeout(() => { if (phase === 'connected') setupWebSocket(); }, 3000);
     };
 
     ws.onerror = (err) => {
@@ -216,6 +300,8 @@ import { setupView } from '/view.js';
       statRes.textContent = `Resolution: ${msg.width} x ${msg.height}`;
     } else if (msg.type === 'status') {
       overlayStatus.textContent = msg.text || 'Processing...';
+    } else if (msg.type === 'session-ended') {
+      sessionEnded = true; // the BMC was disconnected or the browser signed out: do not reconnect
     } else if (msg.type === 'typed') {
       paste.onResult(msg);
     } else if (msg.type === 'ping') {
@@ -391,7 +477,7 @@ import { setupView } from '/view.js';
         const resp = await apiFetch('/api/power', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: currentPowerAction })
+          body: JSON.stringify({ action: currentPowerAction, confirm: true }) // the user confirmed in the dialog
         });
         const res = await resp.json();
         if (!resp.ok || res.error) {

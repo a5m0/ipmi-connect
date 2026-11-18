@@ -70,7 +70,7 @@ func TestConnectControlSkipsPacketsBeforeLoginResponse(t *testing.T) {
 		_, _ = conn.Write(loginResponse(0, 0xCAFEF00D))
 		time.Sleep(200 * time.Millisecond)
 	})
-	c := &Client{Host: host, VPort: port, UserTokenStr: "1", PassTokenStr: "2"}
+	c := &Client{Host: host, ep: plainEndpoint(t, host, port), VPort: port, UserTokenStr: "1", PassTokenStr: "2"}
 	defer c.Close()
 
 	if err := c.ConnectControl(); err != nil {
@@ -86,7 +86,7 @@ func TestConnectControlReportsRejectedLogin(t *testing.T) {
 		_, _ = io.ReadFull(conn, make([]byte, controlAuthLen))
 		_, _ = conn.Write(loginResponse(2, 0))
 	})
-	c := &Client{Host: host, VPort: port}
+	c := &Client{Host: host, ep: plainEndpoint(t, host, port), VPort: port}
 
 	if err := c.ConnectControl(); err == nil {
 		t.Fatal("want error for login status 2")
@@ -105,7 +105,7 @@ func TestConnectControlTimesOutOnSilentBMC(t *testing.T) {
 		_, _ = io.ReadFull(conn, make([]byte, controlAuthLen))
 		time.Sleep(2 * time.Second) // never answer
 	})
-	c := &Client{Host: host, VPort: port}
+	c := &Client{Host: host, ep: plainEndpoint(t, host, port), VPort: port}
 
 	start := time.Now()
 	err := c.ConnectControl()
@@ -123,7 +123,7 @@ func TestConnectVideoTimesOutOnSilentBMC(t *testing.T) {
 	t.Cleanup(func() { apcpHandshakeTimeout = old })
 
 	host, port := fakeAPCP(t, func(conn net.Conn) { time.Sleep(2 * time.Second) })
-	c := &Client{Host: host, VPort: port}
+	c := &Client{Host: host, ep: plainEndpoint(t, host, port), VPort: port}
 
 	start := time.Now()
 	if err := c.ConnectVideo(); err == nil {
@@ -140,7 +140,7 @@ func TestConnectVideoAcceptsZeroMagicAuthReply(t *testing.T) {
 		_, _ = conn.Write(zeroMagicPacket(pktVideoAuthResp, make([]byte, 8)))
 		time.Sleep(200 * time.Millisecond)
 	})
-	c := &Client{Host: host, VPort: port}
+	c := &Client{Host: host, ep: plainEndpoint(t, host, port), VPort: port}
 	defer c.Close()
 
 	if err := c.ConnectVideo(); err != nil {

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=IPMI Connect
+GenericName=BMC Remote Console
+Comment=Console, power control and virtual media for legacy Dell and Supermicro BMCs
+Exec=ipmi-connect --desktop
+Icon=io.github.a5m0.IPMIConnect
+Terminal=false
+StartupNotify=false
+Categories=Network;RemoteAccess;
+Keywords=IPMI;BMC;KVM;iKVM;iDRAC;Supermicro;Dell;Avocent;ATEN;remote console;virtual media;

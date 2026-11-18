@@ -12,9 +12,18 @@ ipmi-connect talks to the BMCs' own KVM and virtual media protocols directly and
 
 ## Screenshots
 
-| Virtual media | Power control |
+| Connection manager | First connection: certificate and protocol consent |
 | :---: | :---: |
-| ![Virtual media panel with a Debian ISO attached as a CD](docs/images/virtual-media.png) | ![Confirmation dialog for a hard reset](docs/images/power-confirm.png) |
+| ![Connection manager with a saved device and the connect form](docs/images/connection-manager.png) | ![Dialog showing an untrusted BMC certificate's fingerprint, obsolete TLS and unencrypted channels, each to be confirmed](docs/images/consent.png) |
+
+| Connection security | Virtual media | Power control |
+| :---: | :---: | :---: |
+| ![Connection security details: obsolete TLS with a pinned certificate on the web interface, unencrypted KVM and virtual media](docs/images/security.png) | ![Virtual media panel with a Debian ISO attached as a CD](docs/images/virtual-media.png) | ![Confirmation dialog for a hard reset](docs/images/power-confirm.png) |
+
+The console and virtual media pictures predate the security badge, the Disconnect button and the
+Writable checkbox (images are now read-only by default). The connection manager, consent and
+security pictures come from the scripted test app (`node test/e2e/screenshots.mjs`), with a
+documentation address.
 
 ## Supported hardware
 
@@ -37,30 +46,120 @@ It has been tested on the two boards I own. Other BMCs running the same firmware
 
 The console also has typed paste (send your clipboard as keystrokes), screenshots, scaling and fullscreen with keyboard lock.
 
-## How to run
+## Install
 
-You need Go 1.27.2 or newer.
+Pick one. Each release attaches native archives for Linux and macOS (amd64, arm64), Flatpak
+bundles (x86_64, aarch64), `sha256sums.txt`, a CycloneDX SBOM and build-provenance attestations;
+see [Verify a release](#verify-a-release).
+
+### Standalone executable (Linux, macOS)
+
+```bash
+tar -xzf ipmi-connect_<version>_linux_amd64.tar.gz
+```
+
+```bash
+install -Dm755 ipmi-connect ~/.local/bin/ipmi-connect
+```
+
+On macOS, use the `darwin` archive; the first run may need **System Settings → Privacy &
+Security → Open Anyway**, because the binary is not notarised.
+
+### Flatpak (Ubuntu and other Linux desktops)
+
+```bash
+flatpak install --user ipmi-connect_<version>_linux_x86_64.flatpak
+```
+
+The bundle pulls the Freedesktop runtime from Flathub (ipmi-connect itself is not on Flathub).
+Start **IPMI Connect** from the application menu, or `flatpak run io.github.a5m0.IPMIConnect`. Its
+only permission is network access; see [Flatpak sandbox](#flatpak-sandbox).
+
+On **Ubuntu** without Flatpak yet: `sudo apt install flatpak`, then log out and back in.
+
+### ChromeOS (Crostini)
+
+Turn on Linux (Settings → About ChromeOS → Developers), then in the Linux terminal either
+install the standalone executable as above, or `sudo apt install flatpak xdg-desktop-portal-gtk`
+and the Flatpak. ChromeOS's browser reaches the Linux container only through forwarded ports, so
+on Crostini ipmi-connect uses port 8080 and `localhost` links; if the page does not load, add port
+8080 under Settings → Developers → Linux → Port forwarding. ChromeOS support is not yet verified
+on hardware.
+
+### From source
+
+You need Go 1.27.2 or newer (builds use the 1.27.4 toolchain named in `go.mod`).
 
 ```bash
 go install github.com/mhamzahkhan/ipmi-connect/cmd/ipmi-connect@latest
-
-export IPMI_CONNECT_PASSWORD='your BMC password'
-ipmi-connect 192.0.2.10                     # logs in as root and opens the console in your browser
-ipmi-connect 192.0.2.20 -u admin --no-browser   # just print the console link
 ```
 
-Or build from a clone with `make build`, which writes `bin/ipmi-connect`.
+Or `make build` in a clone, which writes `bin/ipmi-connect`. The Flatpak build is described in
+[packaging/flatpak/README.md](packaging/flatpak/README.md).
 
-The console runs at `http://127.0.0.1:8080` (or the next free port). The vendor is detected automatically; force it with `--type dell|supermicro`. Credentials come from flags, then environment variables, then defaults:
+## Use
+
+### Desktop
+
+Run `ipmi-connect` with no arguments (or use the launcher). Your browser opens a connection
+manager on a private local address:
+
+1. Enter the BMC's address, user and password, and pick the type (or leave **Detect**).
+2. On first contact you see the BMC's certificate: compare its SHA-256 fingerprint with the one
+   the BMC shows (see [Certificates](#certificates-and-pinning)) and confirm. If the BMC needs
+   obsolete TLS or has unencrypted channels you are asked about those too.
+3. The console opens. The header badge shows how the connection is protected; click it for
+   details. **Disconnect** logs out and returns to the manager; connect to another BMC without
+   restarting. In desktop mode, **Quit** logs out and stops ipmi-connect.
+
+Saved devices and recent connections keep the address, user and type, never the password. After
+30 minutes with no browser open, ipmi-connect logs out of the BMC and quits (`--idle-timeout`).
+
+The link that opens the console works once and expires after two minutes. If you close the tab,
+press Enter in the terminal (if you started it from one) for a new link, or start the app again.
+
+### Command line
+
+```bash
+export IPMI_CONNECT_PASSWORD='your BMC password'
+ipmi-connect 192.0.2.10                       # logs in as root and opens the console
+ipmi-connect 192.0.2.20 -u admin --no-browser  # print the console link instead
+```
+
+The vendor is detected automatically; force it with `--type dell|supermicro`. Credentials come
+from flags, then environment variables, then defaults:
 
 | | Flag | Environment | Default |
 | :--- | :--- | :--- | :--- |
 | User | `-u` | `IPMI_CONNECT_USER` | `root` |
-| Password | `-p` | `IPMI_CONNECT_PASSWORD` | interactive prompt |
+| Password | `-p` (deprecated) | `IPMI_CONNECT_PASSWORD` | interactive prompt |
 
-Prefer the environment variable or the prompt over `-p`, because flags are visible in the process list.
+`-p` still works but warns: flags are visible in the process list. On a terminal, untrusted
+certificates and obsolete protocols are shown and must be confirmed. Scripts must authorise
+them explicitly (decisions are remembered per device):
 
-Press Ctrl+C to exit. ipmi-connect logs out of the BMC first, because the Dell allows only **one** console session; an unclean exit locks you out until the BMC times the session out.
+```bash
+ipmi-connect 192.0.2.10 --trust-fingerprint SHA256:AB:CD:... --allow-legacy-tls
+ipmi-connect 192.0.2.20 --type supermicro --allow-insecure-channels --trust-fingerprint ...
+```
+
+| Flag | Meaning |
+| :--- | :--- |
+| `--desktop` | connection manager (default without a host) |
+| `--web-port <port>` | local port (default 8080 with a host, any free port in desktop mode) |
+| `--no-browser` | print the link (valid 10 minutes) instead of opening it |
+| `--idle-timeout <duration>` | log out and quit after this long with no browser (`0` disables) |
+| `--media-dir <folder>` | also allow virtual media images from this folder (repeatable) |
+| `--trust-fingerprint <sha256>` | trust this certificate (repeatable) |
+| `--replace-fingerprint` | replace a pinned certificate that changed (with `--trust-fingerprint`) |
+| `--allow-legacy-tls` | allow TLS 1.0/1.1 and CBC/3DES ciphers for this BMC |
+| `--allow-insecure-channels` | allow unencrypted KVM / virtual media channels for this BMC |
+
+**Changed in this version:** earlier versions accepted any BMC certificate silently. A first,
+non-interactive connection to a self-signed BMC now needs `--trust-fingerprint`.
+
+Press Ctrl+C to exit. ipmi-connect logs out of the BMC first, because the Dell allows only **one**
+console session; an unclean exit locks you out until the BMC times the session out.
 
 ## Use at your own risk
 
@@ -70,11 +169,84 @@ Be aware that it can power-cycle and reset servers, and that virtual media can w
 
 ## Security
 
-These BMCs predate modern TLS, so use ipmi-connect on a trusted management network.
+These BMCs predate modern security. **Keep them on a dedicated management network** (a VLAN that
+only administrators' machines can reach, with the BMCs unable to reach the internet); nothing
+ipmi-connect does makes an unencrypted channel safe on a shared network. Details:
+[threat model](docs/security/threat-model.md), [sandbox](docs/security/sandbox.md),
+[reporting vulnerabilities](SECURITY.md).
 
-- BMC certificates are not verified. The BMCs use self-signed certificates and TLS 1.0, so the client accepts any certificate. Someone who can intercept traffic between you and the BMC could see the web login, which carries your password.
-- Supermicro KVM and virtual media are not encrypted. The screen and keystrokes travel in plain RFB (the firmware's "KVM SSL" mode is not supported), and virtual media uses RC4 under a fixed key published in the vendor client. Your password is not sent on these channels: they use one-time tickets from the web session.
-- The local console listens on 127.0.0.1 only. API and WebSocket requests need a per-run token, obtained through the one-time code in the launch link, and cross-site requests are refused.
+### Certificates and pinning
+
+The BMCs use self-signed certificates. ipmi-connect accepts a certificate only if it is signed by
+a trusted authority for the BMC's name, or its SHA-256 fingerprint is **pinned** for that BMC. On
+first contact it shows the fingerprint and asks; nothing is sent to the BMC (no password, no
+token) until every certificate the session will use is trusted. If a pinned certificate
+changes, the connection is refused with a warning; replace the pin only if you know why it
+changed (for example a firmware update).
+
+Get the fingerprint from a trusted path, e.g. on the management network:
+
+```bash
+openssl s_client -connect 192.0.2.10:443 </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256
+```
+
+Pins and consents are stored in `known_hosts.json` in the configuration folder (on Linux
+`~/.config/ipmi-connect/`, in the Flatpak `~/.var/app/io.github.a5m0.IPMIConnect/config/ipmi-connect/`,
+on macOS `~/Library/Application Support/ipmi-connect/`). **Forget** in the connection manager
+removes a device's entry.
+
+Certificate checks say *who* you are talking to. They do not make the channel's encryption any
+stronger: the badge reports both separately.
+
+### Obsolete TLS and unencrypted channels
+
+| | Dell C6220 II | Supermicro X8DTL-6F |
+| :--- | :--- | :--- |
+| Web login, power | TLS 1.0 (obsolete), certificate checked | TLS 1.0 with `AES256-SHA` (obsolete), certificate checked |
+| KVM | TLS on the APCP port, certificate checked | **Unencrypted** RFB: screen and keystrokes in clear text |
+| Virtual media | Same TLS channel | **RC4 under a key published in the vendor client**: effectively unencrypted |
+
+Obsolete TLS and unencrypted channels are used only after you agree for that BMC, and the header
+badge stays amber or red for the whole session. The Supermicro's own "KVM SSL" mode is not
+supported. Your password is never sent on the KVM or virtual media channels; they use one-time
+tickets from the web session.
+
+### Local console
+
+The console listens on 127.0.0.1 only and needs the one-time link. Requests from other sites,
+other local ports or rebinding host names are refused; the session token is never put in URLs,
+cookies or persistent browser storage; logging out closes every browser connection. Passwords are
+never written to disk or logs.
+
+### Virtual media
+
+Images are offered only from your home folder (not hidden folders), ipmi-connect's private media
+folder, folders given with `--media-dir`, and files you pick with **Choose File…** (the desktop's
+file chooser). Images are attached **read-only** unless you tick **Writable** and confirm. Power
+actions that can lose work ask for confirmation.
+
+### Flatpak sandbox
+
+The Flatpak can use the network and nothing else: no access to your files, SSH keys, devices,
+container sockets, display server or host commands. Pick images with **Choose File…** (only that
+file is shared with the app) or put them in
+`~/.var/app/io.github.a5m0.IPMIConnect/data/ipmi-connect/media/`. Flatpak's network permission is
+all-or-nothing: it does **not** limit the app to your BMC, and it does not protect unencrypted
+BMC traffic. ipmi-connect itself only ever connects to the BMC you chose, on that BMC's ports. See
+[docs/security/sandbox.md](docs/security/sandbox.md).
+
+## Verify a release
+
+```bash
+sha256sum --check --ignore-missing sha256sums.txt
+gh attestation verify ipmi-connect_<version>_linux_amd64.tar.gz --repo a5m0/ipmi-connect
+```
+
+## Uninstall
+
+- Standalone: delete the executable, and optionally `~/.config/ipmi-connect` and
+  `~/.local/share/ipmi-connect` (macOS: `~/Library/Application Support/ipmi-connect`).
+- Flatpak: `flatpak uninstall --user --delete-data io.github.a5m0.IPMIConnect`.
 
 ## How it was built
 
@@ -102,9 +274,8 @@ Other tools do some of this, but none did everything I wanted: both of my boards
 
 ## Future plans
 
-- Load BMC credentials from HashiCorp Vault
-- An easy way to switch between servers
-- A hosted option: run it in a container on your network, sign in with OAuth, and connect to any of your BMCs from the browser
+- Optional password storage in the desktop's Secret Service (keyring)
+- Supermicro "KVM SSL" (encrypted KVM) firmware and newer BMC generations
 - Screen recording
 - Serial over LAN (SOL)
 
@@ -117,14 +288,21 @@ make            # lint, test, build
 make test       # go test -race ./...
 make lint       # go vet + golangci-lint (config in .golangci.yml)
 make fmt
+node test/e2e/ui.mjs   # browser test of the UI (needs Playwright with Chromium)
 ```
+
+CI also runs govulncheck, licence checks, CodeQL, fuzzing and the Flatpak build.
 
 Code layout:
 
 ```text
-cmd/ipmi-connect/      CLI: flags, vendor detection, per-vendor setup and stream loops
+cmd/ipmi-connect/      CLI and desktop mode: flags, trust prompts, browser launch
 internal/
-  bmc/                 Shared types, legacy TLS 1.0 HTTP client, password prompt
+  session/             One BMC session at a time: trust gate, vendor setup, stream loops, logout
+  trust/               Certificate verification and pinning, TLS probes, trust store
+  config/              Configuration paths, device profiles, recents
+  portal/              xdg-desktop-portal OpenURI and FileChooser
+  bmc/                 Shared types, the BMC endpoint (scoped dialler and HTTP client), password prompt
   dell/                Avocent client: web session, APCP channels, heartbeat, video, input, power
   supermicro/          ATEN client: CGI session, RFB handshake and input, power
   web/                 Local HTTP/WebSocket server, key macros, frame broadcast
@@ -135,13 +313,16 @@ internal/
   atenvm/              Supermicro (ATEN Virtual Storage) virtual media client
   diskimage/           FAT image creation (blank, or from a folder)
   textkeys/            Text to USB HID key presses (US layout)
-docs/                  Hardware notes, protocol specs, per-vendor deep dives
+docs/                  Hardware notes, protocol specs, design, security, test checklists
+packaging/flatpak/     Flatpak manifest, metadata and offline module sources
+test/e2e/              Browser test against a scripted fake BMC session
 ```
 
 ## Known issues
 
 - Supermicro: while the BMC's own web-UI media mount is active, it has one free virtual media slot, so a second drive is refused with "slots are full or busy".
 - `--port` is accepted for compatibility but ignored.
+- Desktop mode starts a new instance each time it is launched; a second launch does not reuse the first.
 
 ## Credits
 
@@ -149,7 +330,7 @@ docs/                  Hardware notes, protocol specs, per-vendor deep dives
 - Eclypsium's [USBAnywhere](https://github.com/eclypsium/USBAnywhere) research, whose published Supermicro virtual media capture gave the test vectors
 - ASPEED's [aspeed_codec](https://github.com/AspeedTech-BMC/aspeed_codec), the reference video decoder the Go decoder is ported from
 - The projects in [Similar projects](#similar-projects), used as references to cross-check protocol details (no code was copied)
-- Libraries: [coder/websocket](https://github.com/coder/websocket), [go-diskfs](https://github.com/diskfs/go-diskfs) and [golang.org/x/term](https://pkg.go.dev/golang.org/x/term)
+- Libraries: [coder/websocket](https://github.com/coder/websocket), [go-diskfs](https://github.com/diskfs/go-diskfs), [godbus/dbus](https://github.com/godbus/dbus) and [golang.org/x/term](https://pkg.go.dev/golang.org/x/term)
 
 ## License
 

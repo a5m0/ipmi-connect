@@ -1,19 +1,20 @@
-package main
+package session
 
 import (
 	"context"
 	"log"
 	"net"
-	"os"
+	"sync"
 	"time"
 
 	"github.com/mhamzahkhan/ipmi-connect/internal/aspeed"
 	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
 	"github.com/mhamzahkhan/ipmi-connect/internal/dell"
-	"github.com/mhamzahkhan/ipmi-connect/internal/web"
+	"github.com/mhamzahkhan/ipmi-connect/internal/trust"
 )
 
 const (
+	dellKVMPort             = 7578
 	dellSessionPollInterval = 15 * time.Second
 	// dellIdleFrameWait is how long to wait for the first packet of a new frame.
 	dellIdleFrameWait = 3 * time.Second
@@ -25,61 +26,108 @@ const (
 	maxReconnectDelay      = time.Minute
 )
 
+func builtinVendors() map[bmc.TargetType]*Vendor {
+	return map[bmc.TargetType]*Vendor{
+		bmc.TargetDell:       dellVendor(),
+		bmc.TargetSupermicro: supermicroVendor(),
+	}
+}
+
 // nextBackoff doubles the reconnect delay, capped at maxReconnectDelay.
 func nextBackoff(d time.Duration) time.Duration {
 	return min(2*d, maxReconnectDelay)
 }
 
-// runDell logs in, opens both APCP channels, and starts the keepalive and video goroutines.
-// It returns the function that ends the BMC session.
-func runDell(ctx context.Context, server *web.Server, host, user, password string) (logout func()) {
-	client := dell.NewClient(host, user, password)
-	server.Console = client
+func dellVendor() *Vendor {
+	return &Vendor{
+		Name:       string(bmc.TargetDell),
+		DetectPort: dellKVMPort,
+		Probe: func(ctx context.Context, ep *bmc.Endpoint) ([]trust.ProbeResult, []string, error) {
+			res, tlsOffered, err := dell.ProbeKVM(ctx, ep, dellKVMPort)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !tlsOffered {
+				return nil, []string{"KVM, video and virtual media (the BMC offers no TLS on its KVM port)"}, nil
+			}
+			return []trust.ProbeResult{res}, nil, nil
+		},
+		Connect: connectDell,
+	}
+}
 
-	server.StateMu.Lock()
-	server.State.Model = "Dell PowerEdge C6220 II (AST2300)"
-	server.State.Firmware = "Avocent 2.62.5"
-	server.StateMu.Unlock()
-
-	log.Printf("[Dell] Initiating login sequence with %s...", host)
+// connectDell logs in, opens both APCP channels, and starts the keepalive and video loops.
+func connectDell(ctx context.Context, ep *bmc.Endpoint, user, password string, d Display) (*Live, error) {
+	client := dell.NewClient(ep, user, password)
 	if err := client.Login(); err != nil {
-		log.Fatalf("[Dell] Login failed: %v", err)
+		return nil, err
 	}
-
-	if err := client.RefreshKVMTokens(); err != nil {
-		fatalAfterLogin(client, "[Dell] Could not get KVM session tokens: %v", err)
+	// The BMC allows a single GUI session: any failure from here must log out, or the next
+	// login is refused until the BMC times the session out.
+	fail := func(err error) (*Live, error) {
+		client.Logout()
+		return nil, err
 	}
-
-	log.Printf("[Dell] Connecting Control Channel on %s:%d...", host, client.VPort)
-	if err := client.ConnectControl(); err != nil {
-		fatalAfterLogin(client, "[Dell] Control channel connection failed: %v", err)
+	steps := []struct {
+		name string
+		run  func() error
+	}{
+		{"KVM session tokens", client.RefreshKVMTokens},
+		{"control channel", client.ConnectControl},
+		{"video channel", client.ConnectVideo},
 	}
-
-	log.Printf("[Dell] Connecting Video Channel on %s:%d...", host, client.VPort)
-	if err := client.ConnectVideo(); err != nil {
-		fatalAfterLogin(client, "[Dell] Video channel connection failed: %v", err)
+	for _, s := range steps {
+		if ctx.Err() != nil {
+			return fail(ctx.Err())
+		}
+		log.Printf("[Dell] Connecting the %s...", s.name)
+		if err := s.run(); err != nil {
+			return fail(err)
+		}
 	}
-
 	if err := client.EnableVideo(); err != nil {
 		log.Printf("[Dell] Notice: EnableVideo: %v", err)
 	}
+	if ctx.Err() != nil {
+		return fail(ctx.Err())
+	}
 
-	go pollDellSession(ctx, server, client)
-	go streamDellVideo(ctx, server, client)
-	return client.Logout
-}
-
-// fatalAfterLogin logs out before exiting: the BMC allows a single GUI session, and leaving it
-// open locks out the next login until the BMC times it out.
-func fatalAfterLogin(client *dell.Client, format string, args ...any) {
-	log.Printf(format, args...)
-	client.Logout()
-	os.Exit(1)
+	runCtx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); pollDellSession(runCtx, d, client) }()
+	go func() { defer wg.Done(); streamDellVideo(runCtx, d, client) }()
+	var once sync.Once
+	return &Live{
+		Console:  client,
+		Model:    "Dell PowerEdge C6220 II (AST2300)",
+		Firmware: "Avocent 2.62.5",
+		Stop: func() {
+			once.Do(func() {
+				cancel()
+				client.Logout() // closes the channels, which ends the video loop's read
+				wg.Wait()
+			})
+		},
+		Channels: func() []bmc.ChannelSecurity {
+			conns := ep.Policy.Connections()
+			web, ok := conns["https"]
+			out := []bmc.ChannelSecurity{tlsChannel("Web interface (login, power)", web, ok)}
+			if client.PlainChannels() {
+				return append(out, bmc.ChannelSecurity{
+					Channel: "KVM, video and virtual media", Encryption: bmc.EncNone, Auth: bmc.AuthNone,
+					Note: "the BMC offered no TLS; screen, keystrokes and disk data are in clear text",
+				})
+			}
+			kvm, ok := conns["kvm"]
+			return append(out, tlsChannel("KVM, video and virtual media", kvm, ok))
+		},
+	}, nil
 }
 
 // pollDellSession keeps the WebGUI session alive and refreshes the reported power state.
-func pollDellSession(ctx context.Context, server *web.Server, client *dell.Client) {
-	setPower(server, client)
+func pollDellSession(ctx context.Context, d Display, client *dell.Client) {
+	setDellPower(d, client)
 	ticker := time.NewTicker(dellSessionPollInterval)
 	defer ticker.Stop()
 	for {
@@ -90,24 +138,22 @@ func pollDellSession(ctx context.Context, server *web.Server, client *dell.Clien
 			if err := client.KeepAlive(); err != nil {
 				log.Printf("[Dell] KeepAlive notice: %v", err)
 			}
-			setPower(server, client)
+			setDellPower(d, client)
 		}
 	}
 }
 
-// setPower records the host power state; a failed read is UNKNOWN rather than a stale value.
-func setPower(server *web.Server, client *dell.Client) {
+// setDellPower records the host power state; a failed read is UNKNOWN rather than a stale value.
+func setDellPower(d Display, client *dell.Client) {
 	pwr, err := client.GetPowerState()
 	if err != nil {
 		pwr = bmc.PowerStateUnknown
 	}
-	server.StateMu.Lock()
-	server.State.PowerState = pwr
-	server.StateMu.Unlock()
+	d.SetPower(pwr)
 }
 
 // streamDellVideo reassembles ASPEED frames from video packets and forwards them to the browser.
-func streamDellVideo(ctx context.Context, srv *web.Server, client *dell.Client) {
+func streamDellVideo(ctx context.Context, d Display, client *dell.Client) {
 	log.Printf("[Dell] Starting live Aspeed video streaming loop...")
 
 	var frames frameAssembler
@@ -133,7 +179,7 @@ func streamDellVideo(ctx context.Context, srv *web.Server, client *dell.Client) 
 			return
 		}
 		decoded++
-		srv.UpdateScreen(h.Width, h.Height, decoder.Frame())
+		d.UpdateScreen(h.Width, h.Height, decoder.Frame())
 	}
 
 	for {
@@ -144,7 +190,7 @@ func streamDellVideo(ctx context.Context, srv *web.Server, client *dell.Client) 
 		}
 
 		if elapsed := time.Since(fpsStart); elapsed >= time.Second {
-			srv.SetFPS(int(float64(decoded)/elapsed.Seconds() + 0.5))
+			d.SetFPS(int(float64(decoded)/elapsed.Seconds() + 0.5))
 			decoded, fpsStart = 0, time.Now()
 		}
 
@@ -169,10 +215,12 @@ func streamDellVideo(ctx context.Context, srv *web.Server, client *dell.Client) 
 				return // shutting down: the read failed because Logout closed the channels
 			}
 			log.Printf("[Dell] Video stream interrupted (%v). Attempting automatic reconnection...", err)
+			d.SetStatus("Reconnecting to the KVM…")
 			frames.take() // a partial frame would decode as garbage
 			if !reconnectDell(ctx, client) {
 				return
 			}
+			d.SetStatus("")
 			// Blocks decoded before the drop may be stale or damaged: start from a full frame.
 			if err := client.RequestFrameRefresh(); err != nil {
 				log.Printf("[Dell] Refresh after reconnect: %v", err)

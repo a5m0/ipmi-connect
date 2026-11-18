@@ -932,3 +932,104 @@ canvas {
   background-color: var(--danger);
   color: #fff;
 }
+
+/* Connection security badge in the header: always visible while connected. */
+.security-badge {
+  font: 600 11px var(--font-sans);
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-highlight);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.security-badge.secure { color: var(--success); border-color: var(--success); }
+.security-badge.legacy { color: var(--warning); border-color: var(--warning); }
+.security-badge.insecure { color: #fff; background: var(--danger); border-color: var(--danger); }
+.enc-tls { color: var(--success); }
+.enc-legacy-tls { color: var(--warning); }
+.enc-weak, .enc-none { color: var(--danger); font-weight: 600; }
+.mono { font-family: var(--font-mono); }
+.small { font-size: 11px; word-break: break-all; }
+.muted { color: var(--text-muted); }
+
+/* Connection manager */
+.connect-view {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--bg-primary);
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 48px 16px;
+  user-select: text;
+}
+.connect-card {
+  width: min(720px, 100%);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.connect-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.connect-head h2 { font-size: 20px; }
+.connect-version { color: var(--text-muted); font-size: 12px; font-family: var(--font-mono); }
+.connect-form { display: flex; flex-direction: column; gap: 12px; }
+.connect-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-secondary); flex: 1; }
+.connect-form label.media-check { flex-direction: row; align-items: center; }
+.connect-form input[type=text], .connect-form input[type=password], .connect-form select {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 8px 10px;
+  font: 14px var(--font-sans);
+}
+.connect-form input:focus, .connect-form select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.connect-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.connect-save { padding-bottom: 8px; }
+.connect-note { color: var(--text-muted); font-size: 12px; }
+.connect-error { color: var(--danger); font-size: 13px; white-space: pre-wrap; }
+.connect-actions { display: flex; gap: 8px; }
+.connect-lists { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 560px) { .connect-lists { grid-template-columns: 1fr; } }
+.connect-list { list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.connect-trust summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+.connect-trust .connect-list { margin-top: 8px; }
+.connect-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.link-button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.link-button:hover { text-decoration: underline; }
+.link-button.danger { color: var(--danger); font-size: 12px; }
+
+/* Consent dialog */
+.consent-body { display: flex; flex-direction: column; gap: 12px; user-select: text; }
+.consent-body p { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+.consent-warning {
+  border: 1px solid var(--danger);
+  background: var(--danger-glow);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.consent-warning strong { color: var(--danger); }
+.consent-check { font-weight: 600; }
+.consent-list { margin-left: 18px; font-size: 13px; color: var(--text-secondary); }
+.cert-table { border-collapse: collapse; font-size: 12px; width: 100%; }
+.cert-table th { text-align: left; color: var(--text-muted); font-weight: 500; padding: 3px 10px 3px 0; white-space: nowrap; vertical-align: top; }
+.cert-table td { padding: 3px 0; word-break: break-all; }
+
+/* Explanatory text under a table in a dialog. */
+.media-table + .modal-description { margin-top: 14px; }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -55,8 +56,9 @@ func (f *fakeMediaConsole) MediaStatus() bmc.MediaStatus {
 
 func mediaServer(t *testing.T, console bmc.Console) (*Server, http.Handler) {
 	t.Helper()
-	srv := NewServer(0, bmc.SessionState{})
-	srv.Console = console
+	srv := newTestServer(bmc.SessionState{})
+	srv.SetConsole(console)
+	srv.Media = NewMediaRoots()
 	h, err := srv.routes()
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +67,7 @@ func mediaServer(t *testing.T, console bmc.Console) (*Server, http.Handler) {
 }
 
 func mediaRequest(srv *Server, h http.Handler, method, path, body string) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(method, "http://127.0.0.1"+path, strings.NewReader(body))
+	r := httptest.NewRequest(method, "http://127.0.0.1:8080"+path, strings.NewReader(body))
 	if body != "" {
 		r.Header.Set("Content-Type", "application/json")
 	}
@@ -74,17 +76,35 @@ func mediaRequest(srv *Server, h http.Handler, method, path, body string) *httpt
 	return rec
 }
 
+// realTemp is a temporary folder with symlinks resolved (macOS's /var is a link).
+func realTemp(t *testing.T) string {
+	t.Helper()
+	d, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
 func TestMediaAPI(t *testing.T) {
 	fc := &fakeMediaConsole{}
 	srv, h := mediaServer(t, fc)
+	dir := realTemp(t)
+	srv.Media.AddRoot(dir)
+	iso := filepath.Join(dir, "x.iso")
+	_ = os.WriteFile(iso, make([]byte, 2048), 0o600)
 	steps := []struct {
 		method, path, body string
 		wantCode           int
 		wantCall           string
 	}{
 		{http.MethodGet, "/api/media", "", 200, ""},
-		{http.MethodPost, "/api/media/images", `{"path":"/isos/x.iso","read_only":true}`, 200, "add /isos/x.iso"},
-		{http.MethodPatch, "/api/media/images/abc", `{"read_only":false}`, 200, "writable abc"},
+		{http.MethodPost, "/api/media/images", `{"path":"` + iso + `","read_only":true}`, 200, "add " + iso},
+		{http.MethodPost, "/api/media/images", `{"path":"` + iso + `"}`, 200, "add " + iso}, // read-only by default
+		{http.MethodPost, "/api/media/images", `{"path":"` + iso + `","read_only":false}`, 400, ""},
+		{http.MethodPost, "/api/media/images", `{"path":"/etc/passwd"}`, 400, ""},
+		{http.MethodPatch, "/api/media/images/abc", `{"read_only":false}`, 400, ""},
+		{http.MethodPatch, "/api/media/images/abc", `{"read_only":false,"confirm_writable":true}`, 200, "writable abc"},
 		{http.MethodPost, "/api/media/drives/cd", `{"image_id":"abc"}`, 200, "map abc cd"},
 		{http.MethodDelete, "/api/media/drives/cd", "", 200, "unmap cd"},
 		{http.MethodPost, "/api/media/usb-reset", "", 200, "usb-reset"},
@@ -129,14 +149,14 @@ func TestMediaAPIUnsupportedConsole(t *testing.T) {
 
 func TestMediaAPIRequiresTokenAndJSON(t *testing.T) {
 	srv, h := mediaServer(t, &fakeMediaConsole{})
-	r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/media/images", strings.NewReader(`{"path":"/x.iso"}`))
+	r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/media/images", strings.NewReader(`{"path":"/x.iso"}`))
 	r.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, r)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("HTTP %d, want 401 without the session token", rec.Code)
 	}
-	r = httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/media/images", strings.NewReader(`{"path":"/x.iso"}`))
+	r = httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/media/images", strings.NewReader(`{"path":"/x.iso"}`))
 	r.Header.Set("Content-Type", "text/plain")
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, authed(srv, r))
@@ -148,7 +168,8 @@ func TestMediaAPIRequiresTokenAndJSON(t *testing.T) {
 func TestCreateImageAPI(t *testing.T) {
 	fc := &fakeMediaConsole{}
 	srv, h := mediaServer(t, fc)
-	dir := t.TempDir()
+	dir := realTemp(t)
+	srv.Media.AddRoot(dir)
 	blank := dir + "/rescue.img"
 	rec := mediaRequest(srv, h, http.MethodPost, "/api/media/create", `{"path":"`+blank+`","size":1474560,"label":"rescue"}`)
 	if rec.Code != 200 {
@@ -161,7 +182,8 @@ func TestCreateImageAPI(t *testing.T) {
 		t.Errorf("calls %v: the new image was not added to the list", fc.calls)
 	}
 
-	src := t.TempDir()
+	src := filepath.Join(dir, "src")
+	_ = os.Mkdir(src, 0o700)
 	_ = os.WriteFile(src+"/a.txt", []byte("x"), 0o600)
 	rec = mediaRequest(srv, h, http.MethodPost, "/api/media/create", `{"path":"`+dir+`/files.img","folder":"`+src+`"}`)
 	if rec.Code != 200 {
@@ -176,9 +198,20 @@ func TestCreateImageAPI(t *testing.T) {
 			t.Errorf("%s: HTTP %d, want 400", body, rec.Code)
 		}
 	}
-	if rec := mediaRequest(srv, h, http.MethodPost, "/api/media/create", `{"path":"`+blank+`","size":1474560}`); rec.Code != 502 ||
+	if rec := mediaRequest(srv, h, http.MethodPost, "/api/media/create", `{"path":"`+blank+`","size":1474560}`); rec.Code != 400 ||
 		!strings.Contains(rec.Body.String(), "exists") {
 		t.Errorf("overwrite: HTTP %d %s", rec.Code, rec.Body.String())
+	}
+	outside := realTemp(t)
+	for _, body := range []string{
+		`{"path":"` + outside + `/new.img","size":1474560}`,       // folder outside the roots
+		`{"path":"` + dir + `/.hidden.img","size":1474560}`,       // hidden name
+		`{"path":"` + dir + `/z.img","folder":"` + outside + `"}`, // source folder outside the roots
+		`{"path":"` + dir + `/../escape.img","size":1474560}`,     // traversal
+	} {
+		if rec := mediaRequest(srv, h, http.MethodPost, "/api/media/create", body); rec.Code != 400 {
+			t.Errorf("%s: HTTP %d %s, want 400", body, rec.Code, rec.Body.String())
+		}
 	}
 }
 

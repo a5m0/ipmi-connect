@@ -2,12 +2,12 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:best-practices",
-    ":pinDigestsDisabled",
     ":prHourlyLimitNone",
     "replacements:all",
     "security:openssf-scorecard",
     "mergeConfidence:all-badges",
-    ":gomod"
+    ":gomod",
+    "helpers:pinGitHubActionDigests"
   ],
   "labels": [
     "renovate",
@@ -102,6 +102,22 @@
         "ci",
         "github-actions"
       ]
+    },
+    {
+      "description": "Go module updates change the Flatpak's offline sources: run `go run ./packaging/flatpak/gen-sources` on the branch (CI fails until it is done)",
+      "matchManagers": [
+        "gomod"
+      ],
+      "prBodyNotes": [
+        "Regenerate the Flatpak module sources: `go run ./packaging/flatpak/gen-sources`, then commit `packaging/flatpak/go-modules.json` and `modules.txt`."
+      ]
+    },
+    {
+      "description": "The Flatpak runtime and SDK move together",
+      "matchFileNames": [
+        "packaging/flatpak/**"
+      ],
+      "groupName": "flatpak runtime"
     }
   ],
   "postUpdateOptions": [

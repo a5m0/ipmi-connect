@@ -168,3 +168,29 @@ func TestCreateFromFolderRejectsNonFolders(t *testing.T) {
 		t.Error("accepted a file as the source folder")
 	}
 }
+
+func TestCreateFromFolderLeavesOutHiddenEntries(t *testing.T) {
+	src := t.TempDir()
+	for name, data := range map[string]string{"keep.txt": "ok", ".env": "SECRET=1", ".git/config": "x", "sub/.ssh/id_rsa": "key", "sub/file": "ok"} {
+		p := filepath.Join(src, filepath.FromSlash(name))
+		_ = os.MkdirAll(filepath.Dir(p), 0o700)
+		if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "x.img")
+	if err := CreateFromFolder(path, src, "X"); err != nil {
+		t.Fatal(err)
+	}
+	fsys, _ := openFS(t, path)
+	for _, keep := range []string{"/keep.txt", "/sub/file"} {
+		if _, err := fs.ReadFile(fsys, keep); err != nil {
+			t.Errorf("%s missing: %v", keep, err)
+		}
+	}
+	for _, hidden := range []string{"/.env", "/.git/config", "/sub/.ssh/id_rsa"} {
+		if _, err := fs.ReadFile(fsys, hidden); err == nil {
+			t.Errorf("hidden %s was copied into the image", hidden)
+		}
+	}
+}

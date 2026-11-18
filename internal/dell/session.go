@@ -38,7 +38,7 @@ func encodeSetValue(val string) string {
 
 // FetchCSRFTokens requests index.html with active cookies to acquire current ST1 and ST2 tokens.
 func (c *Client) FetchCSRFTokens() error {
-	urlStr := fmt.Sprintf("%s/index.html", bmc.BaseURL(c.Host))
+	urlStr := fmt.Sprintf("%s/index.html", c.ep.BaseURL())
 	req, err := http.NewRequest("GET", urlStr, nil)
 	if err != nil {
 		return bmc.FormatError("Dell FetchCSRFTokens", err)
@@ -50,7 +50,7 @@ func (c *Client) FetchCSRFTokens() error {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := readBody(resp)
 	if err != nil {
 		return bmc.FormatError("Dell FetchCSRFTokens read", err)
 	}
@@ -81,13 +81,19 @@ func (c *Client) Login() error {
 	c.SessionMu.Lock()
 	defer c.SessionMu.Unlock()
 
-	initURL := fmt.Sprintf("%s/login.html", bmc.BaseURL(c.Host))
-	initReq, _ := http.NewRequest("GET", initURL, nil)
-	if initResp, err := c.HTTPClient.Do(initReq); err == nil {
-		initResp.Body.Close()
+	initURL := fmt.Sprintf("%s/login.html", c.ep.BaseURL())
+	initReq, err := http.NewRequest("GET", initURL, nil)
+	if err != nil {
+		return bmc.FormatError("Dell Login NewRequest", err)
 	}
+	// Establishes trust before the password is sent: an untrusted certificate fails here.
+	initResp, err := c.HTTPClient.Do(initReq)
+	if err != nil {
+		return bmc.FormatError("Dell Login", err)
+	}
+	initResp.Body.Close()
 
-	loginURL := fmt.Sprintf("%s/data/login", bmc.BaseURL(c.Host))
+	loginURL := fmt.Sprintf("%s/data/login", c.ep.BaseURL())
 	escapedPass := url.QueryEscape(encodeSetValue(c.Password))
 	data := fmt.Sprintf("user=%s&password=%s", url.QueryEscape(c.User), escapedPass)
 
@@ -103,7 +109,7 @@ func (c *Client) Login() error {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := readBody(resp)
 	if err != nil {
 		return bmc.FormatError("Dell Login ReadBody", err)
 	}
@@ -113,7 +119,7 @@ func (c *Client) Login() error {
 		if strings.Contains(body, "code>6<") {
 			return fmt.Errorf("login rejected: an active GUI session already exists on the BMC. Wait 60s for timeout")
 		}
-		return fmt.Errorf("login failed: %s", strings.TrimSpace(body))
+		return fmt.Errorf("login failed: %s", snippet(body))
 	}
 
 	if err := c.FetchCSRFTokens(); err != nil {
@@ -138,7 +144,7 @@ func (c *Client) Logout() {
 		return
 	}
 
-	logoutURL := fmt.Sprintf("%s/data/logout?ST1=%s", bmc.BaseURL(c.Host), c.ST1Token)
+	logoutURL := fmt.Sprintf("%s/data/logout?ST1=%s", c.ep.BaseURL(), c.ST1Token)
 	req, err := http.NewRequest("GET", logoutURL, nil)
 	if err == nil {
 		if c.ST2Token != "" {
@@ -166,7 +172,7 @@ type JNLPResponse struct {
 func (c *Client) FetchKVMParameters() error {
 	ts := time.Now().UnixMilli()
 	st1, _ := c.csrfTokens()
-	urlStr := fmt.Sprintf("%s/viewer.jnlp(%s@0@%d)?ST1=%s", bmc.BaseURL(c.Host), c.Host, ts, st1)
+	urlStr := fmt.Sprintf("%s/viewer.jnlp(%s@0@%d)?ST1=%s", c.ep.BaseURL(), c.Host, ts, st1)
 
 	req, err := http.NewRequest("GET", urlStr, nil)
 	if err != nil {
@@ -179,7 +185,7 @@ func (c *Client) FetchKVMParameters() error {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := readBody(resp)
 	if err != nil {
 		return bmc.FormatError("Dell FetchKVMParameters read", err)
 	}
@@ -218,6 +224,14 @@ func (c *Client) FetchKVMParameters() error {
 	}
 	if user == "" || passwd == "" {
 		return fmt.Errorf("%w: viewer.jnlp carried no KVM tokens", errSessionExpired)
+	}
+	if len(user) > maxTokenLen || len(passwd) > maxTokenLen {
+		return fmt.Errorf("viewer.jnlp KVM tokens are longer than %d bytes", maxTokenLen)
+	}
+	for _, p := range []int{kmPort, vPort} {
+		if err := c.ep.AllowPort(p); err != nil {
+			return fmt.Errorf("viewer.jnlp names an invalid KVM port: %w", err)
+		}
 	}
 
 	c.UserTokenStr, c.PassTokenStr = user, passwd
@@ -261,7 +275,7 @@ func (c *Client) KeepAlive() error {
 		return nil
 	}
 
-	urlStr := fmt.Sprintf("%s/data/keepGUISessionAlive?ST1=%s", bmc.BaseURL(c.Host), c.ST1Token)
+	urlStr := fmt.Sprintf("%s/data/keepGUISessionAlive?ST1=%s", c.ep.BaseURL(), c.ST1Token)
 	req, err := http.NewRequest("POST", urlStr, strings.NewReader(""))
 	if err != nil {
 		return err
@@ -277,4 +291,28 @@ func (c *Client) KeepAlive() error {
 	}
 	defer resp.Body.Close()
 	return nil
+}
+
+// maxBody bounds what is read from any BMC web response.
+const maxBody = 1 << 20
+
+// readBody reads a response body, refusing one larger than maxBody.
+func readBody(resp *http.Response) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxBody {
+		return nil, fmt.Errorf("BMC response is larger than %d bytes", maxBody)
+	}
+	return b, nil
+}
+
+// snippet shortens BMC text for an error message.
+func snippet(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
 }

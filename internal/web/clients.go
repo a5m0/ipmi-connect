@@ -22,15 +22,23 @@ type outMessage struct {
 // wsClient is one connected browser. A dedicated writer drains out, so a slow browser only
 // delays itself.
 type wsClient struct {
-	out  chan outMessage // video and frame updates; may be drained when the browser falls behind
-	ctrl chan outMessage // replies to the browser (e.g. paste results); never drained, sent first
+	out    chan outMessage // video and frame updates; may be drained when the browser falls behind
+	ctrl   chan outMessage // replies to the browser (e.g. paste results); never drained, sent first
+	cancel context.CancelFunc
 }
 
 // ctrlQueueLen bounds pending control replies; they are rare and small.
 const ctrlQueueLen = 8
 
-func newWSClient() *wsClient {
-	return &wsClient{out: make(chan outMessage, clientQueueLen), ctrl: make(chan outMessage, ctrlQueueLen)}
+func newWSClient(cancel context.CancelFunc) *wsClient {
+	return &wsClient{out: make(chan outMessage, clientQueueLen), ctrl: make(chan outMessage, ctrlQueueLen), cancel: cancel}
+}
+
+// close ends the client's socket; its handler releases held input on the way out.
+func (c *wsClient) close(websocket.StatusCode, string) {
+	if c.cancel != nil {
+		c.cancel()
+	}
 }
 
 // writeLoop sends queued messages until ctx ends or a write fails; failure calls cancel so the

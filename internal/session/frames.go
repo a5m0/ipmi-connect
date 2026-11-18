@@ -1,4 +1,4 @@
-package main
+package session
 
 import "github.com/mhamzahkhan/ipmi-connect/internal/dell"
 
@@ -10,10 +10,18 @@ type frameAssembler struct {
 	frame *dell.VideoPacket // frame being assembled; Bitstream accumulates its chunks
 }
 
+// maxFrameBytes bounds one assembled frame. An uncompressed 1920x1200 YUV444 picture is under
+// 7 MB; a BMC that keeps sending continuation chunks beyond this is broken or hostile.
+const maxFrameBytes = 16 << 20
+
 // add consumes one chunk and returns the previous frame if this chunk completed it.
 func (a *frameAssembler) add(pkt *dell.VideoPacket) *dell.VideoPacket {
 	if pkt.Flags&1 == 0 {
 		if a.frame != nil {
+			if len(a.frame.Bitstream)+len(pkt.Bitstream) > maxFrameBytes {
+				a.frame = nil // drop it: a truncated frame would decode as garbage
+				return nil
+			}
 			a.frame.Bitstream = append(a.frame.Bitstream, pkt.Bitstream...)
 		}
 		return nil

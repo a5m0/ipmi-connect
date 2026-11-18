@@ -1,4 +1,4 @@
-package main
+package session
 
 import (
 	"bytes"
@@ -63,4 +63,16 @@ func TestFrameAssembler(t *testing.T) {
 			t.Errorf("completed frame mutated to % x", done.Bitstream)
 		}
 	})
+}
+
+func TestFrameAssemblerDropsOversizedFrames(t *testing.T) {
+	var a frameAssembler
+	a.add(&dell.VideoPacket{Flags: 1, Bitstream: make([]byte, 1024)})
+	chunk := &dell.VideoPacket{Bitstream: make([]byte, 1<<20)}
+	for i := 0; i < maxFrameBytes>>20+2; i++ {
+		a.add(chunk)
+	}
+	if a.inProgress() {
+		t.Fatal("frame kept growing past maxFrameBytes")
+	}
 }

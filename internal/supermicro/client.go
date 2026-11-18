@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"strconv"
 	"sync"
 	"time"
 
@@ -34,8 +33,9 @@ var inBandPower = map[bmc.PowerAction]byte{
 // and implements bmc.Console on whichever session is current.
 type Client struct {
 	host string
+	ep   *bmc.Endpoint
 	web  *WebSession
-	dial func(ctx context.Context, addr string) (net.Conn, error)
+	dial func(ctx context.Context, port int) (net.Conn, error)
 
 	mu      sync.Mutex
 	session *Session
@@ -46,15 +46,22 @@ type Client struct {
 	*vmedia.Manager
 }
 
-// NewClient prepares a client; call Login, then Run.
-func NewClient(host, user, password string) *Client {
+// NewClient prepares a client for the BMC at ep; call Login, then Run. Every connection goes
+// through ep.
+func NewClient(ep *bmc.Endpoint, user, password string) *Client {
+	_ = ep.AllowPort(defaultVMediaPort)
 	c := &Client{
-		host:    host,
-		web:     NewWebSession(host, user, password),
+		host:    ep.Host,
+		ep:      ep,
+		web:     NewWebSession(ep, user, password),
 		stopped: make(chan struct{}),
-		dial: func(ctx context.Context, addr string) (net.Conn, error) {
-			d := net.Dialer{Timeout: dialTimeout}
-			return d.DialContext(ctx, "tcp", addr)
+		dial: func(ctx context.Context, port int) (net.Conn, error) {
+			if err := ep.AllowPort(port); err != nil {
+				return nil, err
+			}
+			dctx, cancel := context.WithTimeout(ctx, dialTimeout)
+			defer cancel()
+			return ep.DialPort(dctx, port)
 		},
 	}
 	c.Manager = vmedia.NewManager(c.openVMedia)
@@ -91,6 +98,11 @@ func (c *Client) Run(ctx context.Context, sink Sink) {
 		if ctx.Err() != nil {
 			return
 		}
+		if errors.Is(err, ErrInsecureChannels) {
+			log.Printf("[Supermicro] %v", err)
+			sink.SetStatus(err.Error())
+			return
+		}
 		if time.Since(started) > stableSession {
 			delay = reconnectMin
 		}
@@ -105,8 +117,16 @@ func (c *Client) Run(ctx context.Context, sink Sink) {
 	}
 }
 
+// ErrInsecureChannels means the KVM (plain RFB) or virtual media (RC4 under a published key)
+// channel would be used without the user's authorisation for this device.
+var ErrInsecureChannels = errors.New("this BMC's KVM and virtual media channels are not encrypted; " +
+	"allow unencrypted channels for this device to connect")
+
 // serveOnce fetches a ticket, connects, authenticates and serves one session.
 func (c *Client) serveOnce(ctx context.Context, sink Sink) error {
+	if !c.ep.InsecureChannelsAllowed() {
+		return ErrInsecureChannels
+	}
 	ticket, err := c.web.FetchTicket(c.host)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -127,7 +147,7 @@ func (c *Client) serveOnce(ctx context.Context, sink Sink) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	conn, err := c.dial(ctx, net.JoinHostPort(c.host, strconv.Itoa(ticket.Port)))
+	conn, err := c.dial(ctx, ticket.Port)
 	if err != nil {
 		return fmt.Errorf("KVM port %d: %w", ticket.Port, err)
 	}

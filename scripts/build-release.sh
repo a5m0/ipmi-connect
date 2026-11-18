@@ -51,13 +51,30 @@ for target in "${TARGETS[@]}"; do
   echo "    Created $ARCHIVE_NAME"
 done
 
+# Flatpak bundles built by the release workflow (flatpak.yml) are collected here.
+if compgen -G "$REPO_ROOT/flatpak-dist/*.flatpak" >/dev/null; then
+  echo "==> Adding Flatpak bundles..."
+  for f in "$REPO_ROOT"/flatpak-dist/*.flatpak; do
+    case "$(basename "$f")" in
+      ipmi-connect_"${VERSION}"_linux_*.flatpak) cp "$f" "$DIST_DIR/" ;;
+      *) echo "Flatpak bundle $f is not for version ${VERSION}" >&2; exit 1 ;;
+    esac
+  done
+fi
+
+echo "==> Generating the SBOM (CycloneDX)..."
+(cd "$REPO_ROOT" && go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0 \
+  app -json -licenses -main cmd/ipmi-connect -output "$DIST_DIR/ipmi-connect_${VERSION}.cdx.json")
+
 echo "==> Generating sha256sums.txt..."
 (
   cd "$DIST_DIR"
+  files=(*.tar.gz *.cdx.json)
+  if compgen -G "*.flatpak" >/dev/null; then files+=(*.flatpak); fi
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum *.tar.gz > sha256sums.txt
+    sha256sum "${files[@]}" > sha256sums.txt
   else
-    shasum -a 256 *.tar.gz > sha256sums.txt
+    shasum -a 256 "${files[@]}" > sha256sums.txt
   fi
 )
 

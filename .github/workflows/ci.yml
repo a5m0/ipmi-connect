@@ -1,5 +1,7 @@
 name: CI
 
+# Untrusted code (pull requests) runs here with read-only permissions and no secrets. Releases
+# are a separate, manually started workflow (release.yml).
 on:
   push:
     branches: [main]
@@ -13,40 +15,139 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# setup-go installs the `go` line of go.mod (the minimum). With auto, the go command then
+# switches to the `toolchain` line (the patched release), downloaded and checksum-verified.
+env:
+  GOTOOLCHAIN: auto
+
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version-file: 'go.mod'
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
           cache: true
-
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "Not gofmt-formatted:"; echo "$unformatted"; exit 1; fi
+      - name: go vet
+        run: go vet ./...
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.15.0
+          # Built with the job's Go: prebuilt binaries may use an older Go than go.mod needs.
+          install-mode: goinstall
 
   test:
-    name: Test
+    name: Test (race)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version-file: 'go.mod'
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
           cache: true
+      - run: go test -race -count=1 ./...
 
-      - name: Run tests with race detector
-        run: go test -race -v ./...
+  security:
+    name: Vulnerabilities and licences
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
+      - name: Licences
+        run: |
+          go run github.com/google/go-licenses/v2@v2.0.1 check ./... \
+            --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,MPL-2.0,ISC
+      - name: Flatpak module sources are current
+        run: |
+          go run ./packaging/flatpak/gen-sources
+          git diff --exit-code packaging/flatpak/go-modules.json packaging/flatpak/modules.txt
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+        with:
+          fail-on-severity: moderate
+          allow-licenses: Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, MPL-2.0, ISC
+
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { pkg: ./internal/aspeed, target: FuzzDecode }
+          - { pkg: ./internal/atenvm, target: FuzzReadFrame }
+          - { pkg: ./internal/atenvm, target: FuzzSCSITarget }
+          - { pkg: ./internal/atenvm, target: FuzzDeviceSession }
+          - { pkg: ./internal/avmp, target: FuzzReadMessage }
+          - { pkg: ./internal/avmp, target: FuzzSession }
+          - { pkg: ./internal/dell, target: FuzzReadPacket }
+          - { pkg: ./internal/dell, target: FuzzParseVideoFrame }
+          - { pkg: ./internal/dell, target: FuzzParseVMCredentials }
+          - { pkg: ./internal/supermicro, target: FuzzReadMessage }
+          - { pkg: ./internal/supermicro, target: FuzzHandshake }
+          - { pkg: ./internal/supermicro, target: FuzzParseTicket }
+          - { pkg: ./internal/supermicro, target: FuzzDecodeHermon }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -run='^$' -fuzz='^${{ matrix.target }}$' -fuzztime=45s ${{ matrix.pkg }}
+      - name: Keep a crashing input
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: '**/testdata/fuzz/${{ matrix.target }}/*'
+
+  ui:
+    name: Browser UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Install Playwright (test tooling only; not a dependency of the application)
+        run: |
+          npm install --no-save --ignore-scripts playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - run: node test/e2e/ui.mjs
 
   compile-check:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
@@ -55,28 +156,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version-file: 'go.mod'
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
           cache: true
-
       - name: Verify compilation
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: |
-          go build -trimpath -o /dev/null ./cmd/ipmi-connect
+        run: go build -trimpath -o /dev/null ./cmd/ipmi-connect
+
+  flatpak:
+    name: Flatpak
+    uses: ./.github/workflows/flatpak.yml
+    with:
+      version: 0.0.0-ci

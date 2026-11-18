@@ -51,13 +51,21 @@ export function createPicker(apiFetch) {
     if (!resp.ok) {
       error.textContent = (await resp.text()).trim() || 'Cannot open that folder';
       error.hidden = false;
-      if (path) return load(''); // fall back to the home folder
+      if (path) return load(''); // fall back to the first allowed folder
       return undefined;
     }
     error.hidden = true;
     const data = await resp.json();
     state.path = data.path;
     state.parent = data.parent;
+    up.disabled = !data.parent;
+    const roots = data.roots || [];
+    if (roots.join('\n') !== rootsSelect.dataset.roots) {
+      rootsSelect.dataset.roots = roots.join('\n');
+      rootsSelect.replaceChildren(...roots.map((r) => el('option', { value: r, textContent: r })));
+    }
+    const root = roots.filter((r) => data.path === r || data.path.startsWith(`${r}/`)).sort((a, b) => b.length - a.length)[0];
+    if (root) rootsSelect.value = root;
     remember(data.path);
     pathLabel.replaceChildren(el('span', { textContent: data.path }));
     pathLabel.title = data.path;
@@ -75,8 +83,10 @@ export function createPicker(apiFetch) {
     }
   }
 
-  document.getElementById('pickerUp').addEventListener('click', () => state && load(state.parent));
-  document.getElementById('pickerHome').addEventListener('click', () => state && load(''));
+  const up = document.getElementById('pickerUp');
+  const rootsSelect = document.getElementById('pickerRoots');
+  up.addEventListener('click', () => state && state.parent && load(state.parent));
+  rootsSelect.addEventListener('change', () => state && load(rootsSelect.value));
   document.getElementById('pickerCancel').addEventListener('click', () => finish(null));
   document.getElementById('btnClosePicker').addEventListener('click', () => finish(null));
   choose.addEventListener('click', () => {

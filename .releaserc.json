@@ -44,6 +44,13 @@
             "path": "dist/*.tar.gz"
           },
           {
+            "path": "dist/*.flatpak"
+          },
+          {
+            "path": "dist/*.cdx.json",
+            "label": "SBOM (CycloneDX)"
+          },
+          {
             "path": "dist/sha256sums.txt",
             "label": "SHA256 Checksums"
           }

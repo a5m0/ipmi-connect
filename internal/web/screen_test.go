@@ -76,8 +76,8 @@ func TestEncodeRectsCarriesPixels(t *testing.T) {
 }
 
 func TestUpdateScreenSendsFullThenChanges(t *testing.T) {
-	srv := NewServer(0, bmc.SessionState{})
-	c := newWSClient()
+	srv := newTestServer(bmc.SessionState{})
+	c := newWSClient(nil)
 	srv.addClient(c)
 	const w, h = 32, 16
 
@@ -105,7 +105,7 @@ func TestUpdateScreenSendsFullThenChanges(t *testing.T) {
 }
 
 func TestUpdateScreenCopiesTheCallersBuffer(t *testing.T) {
-	srv := NewServer(0, bmc.SessionState{})
+	srv := newTestServer(bmc.SessionState{})
 	pix := solid(16, 16, 5)
 	srv.UpdateScreen(16, 16, pix)
 	pix[0] = 99 // the decoder reuses its buffer for the next frame
@@ -147,8 +147,8 @@ func TestScreenshotBeforeFirstFrame(t *testing.T) {
 }
 
 func TestUpdateScreenIgnoresInvalidFrames(t *testing.T) {
-	srv := NewServer(0, bmc.SessionState{})
-	c := newWSClient()
+	srv := newTestServer(bmc.SessionState{})
+	c := newWSClient(nil)
 	srv.addClient(c)
 
 	srv.UpdateScreen(0, 0, nil)                    // no signal
@@ -167,9 +167,9 @@ func TestUpdateScreenIgnoresInvalidFrames(t *testing.T) {
 // A browser attached while frames are flowing gets the full picture before any change that is
 // newer than it, so a stale snapshot can never overwrite fresher tiles.
 func TestAttachClientQueuesSnapshotAtomically(t *testing.T) {
-	srv := NewServer(0, bmc.SessionState{})
+	srv := newTestServer(bmc.SessionState{})
 	srv.UpdateScreen(32, 16, solid(32, 16, 1))
-	c := newWSClient()
+	c := newWSClient(nil)
 
 	srv.attachClient(c)
 	next := solid(32, 16, 1)
@@ -191,5 +191,18 @@ func TestSetFPSReportsInStatus(t *testing.T) {
 	h.ServeHTTP(rec, authed(srv, httptest.NewRequest(http.MethodGet, "/api/status", nil)))
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"fps":35`)) {
 		t.Errorf("status %s lacks fps 35", rec.Body.String())
+	}
+}
+
+func TestAttachStartsFromABlankPicture(t *testing.T) {
+	srv := newTestServer(bmc.SessionState{})
+	srv.SetConsole(&fakeConsole{})
+	srv.UpdateScreen(2, 2, make([]byte, 16))
+	if _, _, pix := srv.screenSnapshot(); pix == nil {
+		t.Fatal("no picture")
+	}
+	srv.Attach(&fakeConsole{}, bmc.SessionState{Host: "other"})
+	if _, _, pix := srv.screenSnapshot(); pix != nil {
+		t.Error("the previous BMC's picture survived Attach")
 	}
 }
