@@ -27,11 +27,11 @@ func keyLog(fc *fakeConsole) string {
 
 func TestTypeText(t *testing.T) {
 	fc := &fakeConsole{}
-	srv := NewServer(0, bmc.SessionState{})
-	srv.Console = fc
+	srv := newTestServer(bmc.SessionState{})
+	srv.SetConsole(fc)
 	srv.typeDelay = 0
 
-	typed, skipped, err := srv.typeText(context.Background(), "aB\né")
+	typed, skipped, err := srv.typeText(context.Background(), srv.console(), "aB\né")
 	if err != nil || typed != 3 || skipped != "é" {
 		t.Fatalf("typed %d, skipped %q, err %v", typed, skipped, err)
 	}
@@ -42,10 +42,10 @@ func TestTypeText(t *testing.T) {
 }
 
 func TestTypeTextLimits(t *testing.T) {
-	srv := NewServer(0, bmc.SessionState{})
-	srv.Console = &fakeConsole{}
+	srv := newTestServer(bmc.SessionState{})
+	srv.SetConsole(&fakeConsole{})
 	srv.typeDelay = 0
-	if _, _, err := srv.typeText(context.Background(), strings.Repeat("a", maxTypeRunes+1)); err == nil {
+	if _, _, err := srv.typeText(context.Background(), srv.console(), strings.Repeat("a", maxTypeRunes+1)); err == nil {
 		t.Error("accepted text over the limit")
 	}
 
@@ -53,11 +53,11 @@ func TestTypeTextLimits(t *testing.T) {
 	srv.typeDelay = 5 * time.Millisecond
 	done := make(chan struct{})
 	go func() {
-		_, _, _ = srv.typeText(context.Background(), strings.Repeat("a", 50))
+		_, _, _ = srv.typeText(context.Background(), srv.console(), strings.Repeat("a", 50))
 		close(done)
 	}()
 	time.Sleep(20 * time.Millisecond)
-	if _, _, err := srv.typeText(context.Background(), "b"); err == nil {
+	if _, _, err := srv.typeText(context.Background(), srv.console(), "b"); err == nil {
 		t.Error("a second paste ran while the first was typing")
 	}
 	<-done
@@ -65,12 +65,12 @@ func TestTypeTextLimits(t *testing.T) {
 
 func TestTypeTextCancel(t *testing.T) {
 	fc := &fakeConsole{}
-	srv := NewServer(0, bmc.SessionState{})
-	srv.Console = fc
+	srv := newTestServer(bmc.SessionState{})
+	srv.SetConsole(fc)
 	srv.typeDelay = 5 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(30 * time.Millisecond); cancel() }()
-	typed, _, err := srv.typeText(ctx, strings.Repeat("A", 200))
+	typed, _, err := srv.typeText(ctx, srv.console(), strings.Repeat("A", 200))
 	if err == nil || typed >= 200 {
 		t.Errorf("typed %d, err %v: want a cancelled, partial paste", typed, err)
 	}
@@ -80,8 +80,8 @@ func TestTypeTextCancel(t *testing.T) {
 }
 
 func TestReplySurvivesVideoDrain(t *testing.T) {
-	srv := NewServer(0, bmc.SessionState{})
-	c := newWSClient()
+	srv := newTestServer(bmc.SessionState{})
+	c := newWSClient(nil)
 	for i := 0; i < clientQueueLen; i++ {
 		c.out <- outMessage{data: []byte{0x04}}
 	}
@@ -114,10 +114,10 @@ func (f *failingUpConsole) SendKeyEvent(down bool, usage uint16) error {
 
 func TestTypingReleasesKeysEvenWhenAReleaseFails(t *testing.T) {
 	fc := &failingUpConsole{failed: map[uint16]bool{}}
-	srv := NewServer(0, bmc.SessionState{})
-	srv.Console = fc
+	srv := newTestServer(bmc.SessionState{})
+	srv.SetConsole(fc)
 	srv.typeDelay = 0
-	if _, _, err := srv.typeText(context.Background(), "A"); err == nil {
+	if _, _, err := srv.typeText(context.Background(), srv.console(), "A"); err == nil {
 		t.Fatal("want the send error")
 	}
 	log := keyLog(&fc.fakeConsole)
@@ -128,7 +128,7 @@ func TestTypingReleasesKeysEvenWhenAReleaseFails(t *testing.T) {
 
 func TestOtherTabsInputIsIgnoredWhileTyping(t *testing.T) {
 	fc := &fakeConsole{}
-	srv := NewServer(0, bmc.SessionState{})
+	srv := newTestServer(bmc.SessionState{})
 	other := newInputState(fc)
 	other.typing = &srv.typing // as handleWS wires it
 	srv.typing.Store(true)

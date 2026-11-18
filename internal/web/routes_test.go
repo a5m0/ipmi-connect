@@ -11,7 +11,7 @@ import (
 )
 
 func TestRoutesServeEmbeddedUI(t *testing.T) {
-	srv := NewServer(0, bmc.SessionState{})
+	srv := newTestServer(bmc.SessionState{})
 	h, err := srv.routes()
 	if err != nil {
 		t.Fatalf("routes: %v", err)
@@ -47,7 +47,7 @@ func TestRoutesServeEmbeddedUI(t *testing.T) {
 }
 
 func TestStatusReportsSessionState(t *testing.T) {
-	srv := NewServer(0, bmc.SessionState{Host: "10.0.0.1", TargetType: bmc.TargetDell, ScreenWidth: 720})
+	srv := newTestServer(bmc.SessionState{Host: "10.0.0.1", TargetType: bmc.TargetDell, ScreenWidth: 720})
 	h, err := srv.routes()
 	if err != nil {
 		t.Fatalf("routes: %v", err)
@@ -66,7 +66,7 @@ func TestStatusReportsSessionState(t *testing.T) {
 }
 
 func TestPowerRejectsNonPost(t *testing.T) {
-	srv := NewServer(0, bmc.SessionState{})
+	srv := newTestServer(bmc.SessionState{})
 	h, err := srv.routes()
 	if err != nil {
 		t.Fatalf("routes: %v", err)
@@ -81,7 +81,7 @@ func TestPowerRejectsNonPost(t *testing.T) {
 }
 
 func TestSetScreenSizeUpdatesStatus(t *testing.T) {
-	srv := NewServer(0, bmc.SessionState{ScreenWidth: 1024, ScreenHeight: 768})
+	srv := newTestServer(bmc.SessionState{ScreenWidth: 1024, ScreenHeight: 768})
 	h, err := srv.routes()
 	if err != nil {
 		t.Fatalf("routes: %v", err)

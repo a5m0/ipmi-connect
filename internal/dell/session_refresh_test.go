@@ -58,7 +58,7 @@ func newFakeAppWebClient(t *testing.T, f *fakeAppWeb) *Client {
 	t.Helper()
 	srv := httptest.NewTLSServer(f)
 	t.Cleanup(srv.Close)
-	c := NewClient(srv.Listener.Addr().String(), "root", "pw")
+	c := NewClient(pinnedEndpoint(t, srv.Listener.Addr().String(), srv.Certificate()), "root", "pw")
 	c.IsLoggedIn = true
 	c.ST1Token = "abc123"
 	return c

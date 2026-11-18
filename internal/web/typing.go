@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
 	"github.com/mhamzahkhan/ipmi-connect/internal/textkeys"
 )
 
@@ -23,11 +24,11 @@ const (
 // typeText types text on the host as US-layout key presses, one paste at a time. It returns how
 // many characters it typed and the ones it could not. On cancel it stops after releasing the
 // keys it was holding.
-func (s *Server) typeText(ctx context.Context, text string) (typed int, skipped string, err error) {
+func (s *Server) typeText(ctx context.Context, console bmc.Console, text string) (typed int, skipped string, err error) {
 	if utf8.RuneCountInString(text) > maxTypeRunes {
 		return 0, "", fmt.Errorf("the text is longer than %d characters", maxTypeRunes)
 	}
-	if s.Console == nil {
+	if console == nil {
 		return 0, "", errors.New("BMC console not connected")
 	}
 	if !s.typeMu.TryLock() {
@@ -38,7 +39,7 @@ func (s *Server) typeText(ctx context.Context, text string) (typed int, skipped 
 	keys, skipped := textkeys.Encode(text)
 	log.Printf("[Input] Typing %d keys", len(keys))
 	send := func(down bool, usage uint16) error {
-		if err := s.Console.SendKeyEvent(down, usage); err != nil {
+		if err := console.SendKeyEvent(down, usage); err != nil {
 			return err
 		}
 		if s.typeDelay > 0 {
@@ -80,7 +81,7 @@ func typeKey(send func(bool, uint16) error, k textkeys.Key) error {
 // handleTyping starts or cancels a paste for one browser: {"type":"type","text":...} and
 // {"type":"type-cancel"}. The result goes back as {"type":"typed","count":n,"skipped":...,"error":...}.
 // Other messages are left to inputState.
-func (s *Server) handleTyping(ctx context.Context, client *wsClient, in *inputState, data []byte, cancel *context.CancelFunc) {
+func (s *Server) handleTyping(ctx context.Context, b *consoleBinding, client *wsClient, in *inputState, data []byte, cancel *context.CancelFunc) {
 	var msg clientMessage
 	if json.Unmarshal(data, &msg) != nil {
 		return
@@ -99,11 +100,13 @@ func (s *Server) handleTyping(ctx context.Context, client *wsClient, in *inputSt
 		in.releaseAll() // keys held in the browser would modify the typed text
 		tctx, tcancel := context.WithCancel(ctx)
 		*cancel = tcancel
-		s.connWG.Add(1) // shutdown waits for the keys to be released
+		s.connWG.Add(1) // shutdown and Detach wait for the keys to be released
+		b.wg.Add(1)
 		go func() {
 			defer s.connWG.Done()
+			defer b.wg.Done()
 			defer tcancel()
-			n, skipped, err := s.typeText(tctx, msg.Text)
+			n, skipped, err := s.typeText(tctx, b.console, msg.Text)
 			s.typing.Store(false)
 			res := map[string]any{"type": "typed", "id": msg.ID, "count": n, "skipped": skipped}
 			if err != nil {

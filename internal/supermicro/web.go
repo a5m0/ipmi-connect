@@ -24,6 +24,7 @@ const (
 // WebSession is the BMC's web (CGI) session: login, the KVM ticket, power, logout.
 type WebSession struct {
 	host, user, password string
+	ep                   *bmc.Endpoint
 	http                 *http.Client
 	ticketRetryDelay     time.Duration
 
@@ -31,14 +32,14 @@ type WebSession struct {
 	sid string
 }
 
-// NewWebSession prepares a session; nothing is sent until Login.
-func NewWebSession(host, user, password string) *WebSession {
-	c := bmc.NewLegacyHTTPClient(webTimeout)
+// NewWebSession prepares a session with the BMC at ep; nothing is sent until Login.
+func NewWebSession(ep *bmc.Endpoint, user, password string) *WebSession {
+	c := ep.HTTPClient(webTimeout)
 	c.Jar = nil // cookies are set by hand; a jar would send SID twice
-	return &WebSession{host: host, user: user, password: password, http: c, ticketRetryDelay: time.Second}
+	return &WebSession{host: ep.Host, ep: ep, user: user, password: password, http: c, ticketRetryDelay: time.Second}
 }
 
-func (w *WebSession) url(path string) string { return bmc.BaseURL(w.host) + path }
+func (w *WebSession) url(path string) string { return w.ep.BaseURL() + path }
 
 // do sends a request with the session cookies and returns the (bounded) body.
 func (w *WebSession) do(method, path string, form url.Values) (string, error) {

@@ -3,6 +3,7 @@ package main
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestParseArgs(t *testing.T) {
@@ -29,7 +30,9 @@ func TestParseArgs(t *testing.T) {
 		{
 			"long flags with equals",
 			[]string{"--user=admin", "--pass=x", "--type=dell", "--web-port=9000", "h"},
-			with(func(o *options) { o.Host, o.User, o.Password, o.Type, o.WebPort = "h", "admin", "x", "dell", 9000 }),
+			with(func(o *options) {
+				o.Host, o.User, o.Password, o.Type, o.WebPort, o.WebPortSet = "h", "admin", "x", "dell", 9000, true
+			}),
 		},
 		{
 			"-p followed by a flag leaves password empty so it is prompted",
@@ -43,6 +46,20 @@ func TestParseArgs(t *testing.T) {
 		{"version short", []string{"-v"}, with(func(o *options) { o.ShowVersion = true })},
 		{"version long", []string{"--version"}, with(func(o *options) { o.ShowVersion = true })},
 		{"version single dash", []string{"-version"}, with(func(o *options) { o.ShowVersion = true })},
+		{"desktop", []string{"--desktop"}, with(func(o *options) { o.Desktop = true })},
+		{"short user with equals", []string{"-u=admin", "h"}, with(func(o *options) { o.Host, o.User = "h", "admin" })},
+		{
+			"trust flags",
+			[]string{"h", "--trust-fingerprint", "AA:BB", "--trust-fingerprint=CC", "--replace-fingerprint", "--allow-legacy-tls", "--allow-insecure-kvm"},
+			with(func(o *options) {
+				o.Host, o.TrustFingerprints, o.ReplaceFingerprint, o.AllowLegacyTLS, o.AllowInsecure = "h", []string{"AA:BB", "CC"}, true, true, true
+			}),
+		},
+		{"media dirs", []string{"--media-dir", "/isos", "--media-dir=/more"}, with(func(o *options) { o.MediaDirs = []string{"/isos", "/more"} })},
+		{"idle timeout", []string{"--idle-timeout", "5m"}, with(func(o *options) { o.IdleTimeout, o.IdleSet = 5 * time.Minute, true })},
+		{"idle timeout off", []string{"--idle-timeout=0"}, with(func(o *options) { o.IdleSet = true })},
+		{"bad idle timeout ignored", []string{"--idle-timeout", "soon"}, defaults},
+		{"web port 0 asks the OS", []string{"--web-port", "0"}, with(func(o *options) { o.WebPort, o.WebPortSet = 0, true })},
 	}
 
 	for _, tt := range tests {

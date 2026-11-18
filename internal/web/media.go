@@ -1,36 +1,60 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
 	"github.com/mhamzahkhan/ipmi-connect/internal/diskimage"
 )
 
-// mediaRoutes registers the virtual media API. Paths name files on this machine; the server
-// and the browser belong to the same user, behind the session token.
+// pickTimeout bounds how long the native file chooser may stay open.
+const pickTimeout = 10 * time.Minute
+
+// errNoRoots means virtual media has nowhere it may read images from.
+var errNoRoots = badRequest("virtual media folders are not configured")
+
+// mediaRoutes registers the virtual media API. Every path is checked against s.Media: only
+// files in the allowed folders, or picked in the desktop's file chooser, can be used. Images are
+// read-only unless the request explicitly confirms that the host may write to them.
 func (s *Server) mediaRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/files", s.handleFiles)
+	mux.HandleFunc("POST /api/media/pick", s.handlePick)
 	mux.HandleFunc("GET /api/media", s.media(func(vm bmc.VirtualMedia, r *http.Request) error { return nil }))
 	mux.HandleFunc("POST /api/media/images", s.mediaJSON(func(vm bmc.VirtualMedia, r *http.Request) error {
 		var req struct {
-			Path     string `json:"path"`
-			ReadOnly bool   `json:"read_only"`
+			Path            string `json:"path"`
+			ReadOnly        *bool  `json:"read_only"`
+			ConfirmWritable bool   `json:"confirm_writable"`
 		}
 		if err := decode(r, &req); err != nil || req.Path == "" {
-			return badRequest(`send {"path": "/full/path/to/image.iso", "read_only": false}`)
+			return badRequest(`send {"path": "/full/path/to/image.iso"}`)
 		}
-		_, err := vm.AddImage(req.Path, req.ReadOnly)
+		readOnly := req.ReadOnly == nil || *req.ReadOnly
+		if !readOnly && !req.ConfirmWritable {
+			return badRequest("writable images need confirmation: the host can change or erase them")
+		}
+		path, err := s.resolveMedia(req.Path)
+		if err != nil {
+			return err
+		}
+		_, err = vm.AddImage(path, readOnly)
 		return err
 	}))
 	mux.HandleFunc("PATCH /api/media/images/{id}", s.mediaJSON(func(vm bmc.VirtualMedia, r *http.Request) error {
 		var req struct {
-			ReadOnly *bool `json:"read_only"`
+			ReadOnly        *bool `json:"read_only"`
+			ConfirmWritable bool  `json:"confirm_writable"`
 		}
 		if err := decode(r, &req); err != nil || req.ReadOnly == nil {
 			return badRequest(`send {"read_only": true}`)
+		}
+		if !*req.ReadOnly && !req.ConfirmWritable {
+			return badRequest("writable images need confirmation: the host can change or erase them")
 		}
 		return vm.SetImageReadOnly(r.PathValue("id"), *req.ReadOnly)
 	}))
@@ -68,23 +92,95 @@ func (s *Server) mediaRoutes(mux *http.ServeMux) {
 		if err := decode(r, &req); err != nil || req.Path == "" || (req.Size > 0) == (req.Folder != "") {
 			return badRequest(`send {"path": "/full/path/new.img", "size": bytes} or {"path": ..., "folder": "/full/path"}`)
 		}
-		var err error
-		if req.Folder != "" {
-			log.Printf("[Server] Creating image %q from %q", req.Path, req.Folder)
-			err = diskimage.CreateFromFolder(req.Path, req.Folder, req.Label)
-		} else {
-			log.Printf("[Server] Creating a blank %d-byte image %q", req.Size, req.Path)
-			err = diskimage.CreateBlank(req.Path, req.Size, req.Label)
+		if s.Media == nil {
+			return errNoRoots
 		}
+		path, err := s.Media.ResolveNew(req.Path)
 		if err != nil {
-			return err
+			return badRequest(err.Error())
 		}
-		_, err = vm.AddImage(req.Path, false)
+		if req.Folder != "" {
+			folder, err := s.resolveMedia(req.Folder)
+			if err != nil {
+				return err
+			}
+			log.Printf("[Server] Creating an image from a folder")
+			err = diskimage.CreateFromFolder(path, folder, req.Label)
+			if err != nil {
+				return err
+			}
+		} else {
+			log.Printf("[Server] Creating a blank %d-byte image", req.Size)
+			if err := diskimage.CreateBlank(path, req.Size, req.Label); err != nil {
+				return err
+			}
+		}
+		// The user asked for a new disk to write to: it is created writable.
+		_, err = vm.AddImage(path, false)
 		return err
 	}))
 	mux.HandleFunc("POST /api/media/usb-reset", s.media(func(vm bmc.VirtualMedia, r *http.Request) error {
 		return vm.USBReset()
 	}))
+}
+
+// resolveMedia checks a path against the media roots and returns its real path.
+func (s *Server) resolveMedia(path string) (string, error) {
+	if s.Media == nil {
+		return "", errNoRoots
+	}
+	real, err := s.Media.Resolve(path)
+	if err != nil {
+		return "", badRequest(err.Error())
+	}
+	return real, nil
+}
+
+// handlePick opens the desktop's file chooser (on the user's screen, outside the browser) and
+// allows the chosen file. In a Flatpak this is how files outside the sandbox become available:
+// the document portal exposes just the chosen file.
+func (s *Server) handlePick(w http.ResponseWriter, r *http.Request) {
+	if s.PickFile == nil || s.Media == nil {
+		writeJSONError(w, http.StatusNotImplemented, badRequest("no desktop file chooser is available"))
+		return
+	}
+	var req struct {
+		Directory bool `json:"directory"`
+	}
+	if r.ContentLength != 0 {
+		if !requireJSON(w, r) {
+			return
+		}
+		_ = decode(r, &req)
+	}
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Now().Add(pickTimeout + 10*time.Second))
+	ctx, cancel := context.WithTimeout(r.Context(), pickTimeout)
+	defer cancel()
+	title := "Choose a disk image for virtual media"
+	if req.Directory {
+		title = "Choose a folder to copy into a new image"
+	}
+	paths, err := s.PickFile(ctx, title, req.Directory)
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, err)
+		return
+	}
+	var picked []string
+	for _, p := range paths {
+		real, err := s.Media.AddFile(p)
+		if err != nil {
+			continue
+		}
+		if req.Directory {
+			s.Media.AddRoot(real)
+		}
+		picked = append(picked, real)
+	}
+	if picked == nil {
+		picked = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"paths": picked})
 }
 
 type badRequest string
@@ -105,21 +201,21 @@ func decode(r *http.Request, v any) error { return json.NewDecoder(r.Body).Decod
 // error (400 for bad input, 502 for anything the console or BMC refused).
 func (s *Server) media(action func(bmc.VirtualMedia, *http.Request) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		vm, ok := s.Console.(bmc.VirtualMedia)
+		vm, ok := s.console().(bmc.VirtualMedia)
 		if !ok {
 			http.Error(w, "virtual media is not supported for this BMC", http.StatusNotImplemented)
 			return
 		}
 		if err := action(vm, r); err != nil {
 			code := http.StatusBadGateway
-			if _, bad := err.(badRequest); bad {
+			var bad badRequest
+			if errors.As(err, &bad) {
 				code = http.StatusBadRequest
 			}
 			writeJSONError(w, code, err)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(vm.MediaStatus())
+		writeJSON(w, http.StatusOK, vm.MediaStatus())
 	}
 }
 
@@ -134,7 +230,5 @@ func (s *Server) mediaJSON(action func(bmc.VirtualMedia, *http.Request) error) h
 }
 
 func writeJSONError(w http.ResponseWriter, code int, err error) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+	writeJSON(w, code, map[string]string{"error": err.Error()})
 }

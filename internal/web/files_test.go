@@ -33,7 +33,12 @@ func list(t *testing.T, srv *Server, h http.Handler, query string) (int, listing
 
 func TestFileBrowser(t *testing.T) {
 	srv, h := mediaServer(t, &fakeMediaConsole{})
-	dir := t.TempDir()
+	dir := realTemp(t)
+	srv.Media.AddRoot(dir)
+	outside := realTemp(t)
+	_ = os.WriteFile(filepath.Join(outside, "secret.iso"), make([]byte, 10), 0o600)
+	_ = os.Symlink(filepath.Join(outside, "secret.iso"), filepath.Join(dir, "escape.iso"))
+	_ = os.Symlink(outside, filepath.Join(dir, "escape-dir"))
 	for _, name := range []string{"b.iso", "a.IMG", "notes.txt", ".hidden.iso"} {
 		_ = os.WriteFile(filepath.Join(dir, name), make([]byte, 10), 0o600)
 	}
@@ -60,18 +65,30 @@ func TestFileBrowser(t *testing.T) {
 			t.Fatalf("entries %v, want %v", got, want)
 		}
 	}
-	if l.Path != dir || l.Parent != filepath.Dir(dir) || !l.Entries[0].Dir || l.Entries[3].Size != 10 {
+	// The root has no parent to go up to; links out of the roots are not listed.
+	if l.Path != dir || l.Parent != "" || !l.Entries[0].Dir || l.Entries[3].Size != 10 {
 		t.Errorf("listing %+v", l)
+	}
+	if code, l := list(t, srv, h, "path="+url.QueryEscape(filepath.Join(dir, "alpha"))+"&mode=file"); code != 200 || l.Parent != dir {
+		t.Errorf("subfolder: HTTP %d parent %q, want %q", code, l.Parent, dir)
 	}
 
 	if _, l := list(t, srv, h, "path="+url.QueryEscape(dir)+"&mode=dir"); len(l.Entries) != 2 {
 		t.Errorf("dir mode lists %d entries, want only the 2 folders", len(l.Entries))
 	}
-	home, _ := os.UserHomeDir()
-	if code, l := list(t, srv, h, "mode=file"); code != 200 || l.Path != home {
-		t.Errorf("default listing: HTTP %d path %q, want the home folder", code, l.Path)
+	if code, l := list(t, srv, h, "mode=file"); code != 200 || l.Path != dir {
+		t.Errorf("default listing: HTTP %d path %q, want the first root", code, l.Path)
 	}
-	for _, q := range []string{"path=relative&mode=file", "path=" + url.QueryEscape(filepath.Join(dir, "b.iso")), "path=" + url.QueryEscape(filepath.Join(dir, "missing"))} {
+	for _, q := range []string{
+		"path=relative&mode=file",
+		"path=" + url.QueryEscape(filepath.Join(dir, "b.iso")),
+		"path=" + url.QueryEscape(filepath.Join(dir, "missing")),
+		"path=" + url.QueryEscape(outside),                          // outside the roots
+		"path=" + url.QueryEscape(filepath.Join(dir, "escape-dir")), // a link out of the roots
+		"path=" + url.QueryEscape(filepath.Join(dir, ".git")),       // hidden
+		"path=" + url.QueryEscape(filepath.Join(dir, "alpha", "..", "..")),
+		"path=%2Fetc",
+	} {
 		if code, _ := list(t, srv, h, q); code != http.StatusBadRequest {
 			t.Errorf("%s: HTTP %d, want 400", q, code)
 		}
@@ -80,8 +97,8 @@ func TestFileBrowser(t *testing.T) {
 
 func TestFileBrowserRequiresToken(t *testing.T) {
 	_, h := mediaServer(t, &fakeMediaConsole{})
-	r, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1/api/files?mode=file", nil)
-	r.Host = "127.0.0.1"
+	r, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:8080/api/files?mode=file", nil)
+	r.Host = "127.0.0.1:8080"
 	rec := newRecorder()
 	h.ServeHTTP(rec, r)
 	if rec.Code != http.StatusUnauthorized {

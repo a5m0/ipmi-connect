@@ -27,6 +27,8 @@ type Policy struct {
 	// AllowLegacyTLS permits obsolete TLS for this policy even without stored consent (used
 	// for an explicit authorisation that the caller has not persisted).
 	AllowLegacyTLS bool
+	// AllowInsecureChannels likewise permits unencrypted or weakly encrypted channels.
+	AllowInsecureChannels bool
 	// Roots overrides the system roots (tests).
 	Roots *x509.CertPool
 

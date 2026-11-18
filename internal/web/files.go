@@ -1,12 +1,14 @@
 package web
 
 import (
-	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // maxListing bounds one folder listing.
@@ -18,29 +20,170 @@ type fileEntry struct {
 	Size int64  `json:"size,omitempty"`
 }
 
-// handleFiles lists a folder on this machine for the image picker: subfolders and, in "file"
-// mode, .iso and .img files. Browsers never reveal a picked file's real path, and copying
-// images through the browser would break writes to .img files, so the server, which runs on
-// the user's own machine, browses for them. Hidden entries are left out; file contents are
-// never read.
-func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Query().Get("path")
-	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			http.Error(w, "no home folder", http.StatusBadRequest)
-			return
-		}
-		path = home
+// MediaRoots confines virtual media to places the user chose: a set of folders (by default
+// the home folder and the application's private media folder, plus any given with
+// --media-dir) and individual files picked in the desktop's file chooser. Paths are resolved
+// through symlinks before the check, so a link inside a root cannot reach outside it, and hidden
+// entries below a root (~/.ssh, ~/.config, ...) are never offered or accepted.
+type MediaRoots struct {
+	mu    sync.Mutex
+	roots []string        // resolved, cleaned absolute folders
+	files map[string]bool // resolved files picked explicitly
+}
+
+// NewMediaRoots returns roots for the given folders; ones that do not exist are skipped.
+func NewMediaRoots(dirs ...string) *MediaRoots {
+	m := &MediaRoots{files: map[string]bool{}}
+	for _, d := range dirs {
+		m.AddRoot(d)
 	}
-	if !filepath.IsAbs(path) {
-		http.Error(w, "give a full path", http.StatusBadRequest)
+	return m
+}
+
+// AddRoot allows a folder and everything (not hidden) below it.
+func (m *MediaRoots) AddRoot(dir string) {
+	if dir == "" || !filepath.IsAbs(dir) {
 		return
 	}
-	path = filepath.Clean(path)
-	dirents, err := os.ReadDir(path)
+	real, err := filepath.EvalSymlinks(dir)
 	if err != nil {
-		http.Error(w, "cannot open that folder", http.StatusBadRequest)
+		return
+	}
+	if info, err := os.Stat(real); err != nil || !info.IsDir() {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, r := range m.roots {
+		if r == real {
+			return
+		}
+	}
+	m.roots = append(m.roots, real)
+}
+
+// AddFile allows one file the user picked explicitly, returning its resolved path.
+func (m *MediaRoots) AddFile(path string) (string, error) {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.files[real] = true
+	return real, nil
+}
+
+// Roots lists the allowed folders.
+func (m *MediaRoots) Roots() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.roots...)
+}
+
+var errOutsideRoots = errors.New("that location is outside the folders ipmi-connect may use for virtual media")
+
+// Resolve returns the real path of an existing file or folder, if it is allowed.
+func (m *MediaRoots) Resolve(path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", errors.New("give a full path")
+	}
+	real, err := filepath.EvalSymlinks(filepath.Clean(path))
+	if err != nil {
+		return "", fmt.Errorf("cannot open %s", filepath.Base(path))
+	}
+	if !m.allowed(real) {
+		return "", errOutsideRoots
+	}
+	return real, nil
+}
+
+// ResolveNew returns the real path for a file to be created, if its folder is allowed and its
+// name is not hidden. The file must not exist yet.
+func (m *MediaRoots) ResolveNew(path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", errors.New("give a full path")
+	}
+	path = filepath.Clean(path)
+	name := filepath.Base(path)
+	if strings.HasPrefix(name, ".") {
+		return "", errors.New("the file name must not start with a dot")
+	}
+	dir, err := m.Resolve(filepath.Dir(path))
+	if err != nil {
+		return "", err
+	}
+	full := filepath.Join(dir, name)
+	if _, err := os.Lstat(full); err == nil {
+		return "", fmt.Errorf("%s already exists", name)
+	}
+	return full, nil
+}
+
+// allowed reports whether a resolved path is an explicitly picked file or lies, without hidden
+// components, within a root.
+func (m *MediaRoots) allowed(real string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.files[real] {
+		return true
+	}
+	for _, r := range m.roots {
+		rel, err := filepath.Rel(r, real)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+			continue
+		}
+		if rel == "." {
+			return true
+		}
+		hidden := false
+		for _, part := range strings.Split(rel, string(filepath.Separator)) {
+			if strings.HasPrefix(part, ".") {
+				hidden = true
+				break
+			}
+		}
+		if !hidden {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *MediaRoots) isRoot(real string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, r := range m.roots {
+		if r == real {
+			return true
+		}
+	}
+	return false
+}
+
+// handleFiles lists a folder for the image picker: subfolders and, in "file" mode, .iso and
+// .img files, within the media roots. Browsers never reveal a picked file's real path, and
+// copying images through the browser would break writes to .img files, so the server browses
+// for them. Hidden entries and links leading outside the roots are left out; file contents are
+// never read.
+func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
+	roots := s.Media
+	if roots == nil || len(roots.Roots()) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"path": "", "parent": "", "entries": []fileEntry{}, "roots": []string{}})
+		return
+	}
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		path = roots.Roots()[0]
+	}
+	real, err := roots.Resolve(path)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err)
+		return
+	}
+	dirents, err := os.ReadDir(real)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, badRequest("cannot open that folder"))
 		return
 	}
 	files := r.URL.Query().Get("mode") == "file"
@@ -50,7 +193,12 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(d.Name(), ".") || len(entries) >= maxListing {
 			continue
 		}
-		info, err := os.Stat(filepath.Join(path, d.Name())) // follows links
+		full := filepath.Join(real, d.Name())
+		target, err := filepath.EvalSymlinks(full)
+		if err != nil || !roots.allowed(target) {
+			continue // a link out of the roots
+		}
+		info, err := os.Stat(target)
 		if err != nil {
 			continue
 		}
@@ -68,7 +216,11 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		}
 		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 	})
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"path": path, "parent": filepath.Dir(path), "entries": entries})
+	parent := ""
+	if !roots.isRoot(real) {
+		if p, err := roots.Resolve(filepath.Dir(real)); err == nil {
+			parent = p
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"path": real, "parent": parent, "entries": entries, "roots": roots.Roots()})
 }

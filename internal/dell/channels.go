@@ -2,19 +2,23 @@ package dell
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
+	"github.com/mhamzahkhan/ipmi-connect/internal/trust"
 )
+
+// maxTokenLen is the size of each token field in the cb login packet.
+const maxTokenLen = 96
 
 // connectAPCP performs the 53-byte APCP handshake on the given port and channel mode,
 // upgrading to TLS 1.0.
@@ -44,8 +48,7 @@ func apcpGreeting(mode, major, minor byte, nonce []byte) []byte {
 
 // connectAPCPVersion is connectAPCP with explicit version bytes; the virtual media client sends 0.0.
 func (c *Client) connectAPCPVersion(port int, mode, major, minor byte) (net.Conn, error) {
-	addr := net.JoinHostPort(c.Host, strconv.Itoa(port))
-	rawConn, err := net.DialTimeout("tcp", addr, dialTimeout)
+	rawConn, err := c.ep.DialPort(context.Background(), port)
 	if err != nil {
 		return nil, bmc.FormatError("Dell connectAPCP dial", err)
 	}
@@ -62,33 +65,90 @@ func (c *Client) connectAPCPVersion(port int, mode, major, minor byte) (net.Conn
 		return nil, bmc.FormatError("Dell connectAPCP write handshake", err)
 	}
 
-	resp := make([]byte, 53)
-	if _, err := io.ReadFull(rawConn, resp); err != nil {
+	serverCaps, err := readAPCPReply(rawConn)
+	if err != nil {
 		rawConn.Close()
-		return nil, bmc.FormatError("Dell connectAPCP read response", err)
+		return nil, err
 	}
 
-	if string(resp[:4]) != "APCP" {
-		rawConn.Close()
-		return nil, fmt.Errorf("invalid APCP magic: %v", resp[:4])
-	}
-
-	serverCaps := binary.BigEndian.Uint32(resp[14:18])
-	conn := net.Conn(rawConn)
-
-	if (serverCaps & 0x04) != 0 {
-		tlsConfig := bmc.LegacyTLSConfig()
-		tlsConfig.ServerName = c.Host
-		tlsConn := tls.Client(rawConn, tlsConfig)
-		if err := tlsConn.Handshake(); err != nil {
+	if serverCaps&apcpCapTLS == 0 {
+		// The BMC would carry the one-time tokens, keystrokes and screen in clear text.
+		if !c.ep.InsecureChannelsAllowed() {
 			rawConn.Close()
-			return nil, bmc.FormatError("Dell APCP TLS handshake", err)
+			return nil, ErrPlainAPCP
 		}
-		conn = tlsConn
+		c.plainChannels.Store(true)
+		log.Printf("[Dell] WARNING: the BMC offers no TLS on port %d; this channel is unencrypted", port)
+		return rawConn, nil
 	}
-
-	return conn, nil
+	ctx, cancel := context.WithTimeout(context.Background(), apcpHandshakeTimeout)
+	defer cancel()
+	tlsConn, err := c.ep.TLSClient(ctx, rawConn, "kvm")
+	if err != nil {
+		rawConn.Close()
+		return nil, bmc.FormatError("Dell APCP TLS handshake", err)
+	}
+	return tlsConn, nil
 }
+
+// apcpCapTLS is the capability bit for TLS in the APCP greeting.
+const apcpCapTLS = 0x04
+
+// ErrPlainAPCP means the BMC offered an APCP channel without TLS and unencrypted channels are
+// not authorised for it.
+var ErrPlainAPCP = errors.New("the BMC offers this KVM channel without encryption; " +
+	"allow unencrypted channels for this device to connect")
+
+// readAPCPReply reads the 53-byte greeting reply and returns the server's capabilities.
+func readAPCPReply(conn net.Conn) (uint32, error) {
+	resp := make([]byte, 53)
+	if _, err := io.ReadFull(conn, resp); err != nil {
+		return 0, bmc.FormatError("Dell connectAPCP read response", err)
+	}
+	if string(resp[:4]) != "APCP" {
+		return 0, fmt.Errorf("invalid APCP magic: %v", resp[:4])
+	}
+	return binary.BigEndian.Uint32(resp[14:18]), nil
+}
+
+// ProbeKVM learns the certificate the KVM port presents, without authenticating: the greeting,
+// then a TLS handshake that is abandoned once the certificate is seen. It reports ok=false when
+// the BMC offers no TLS on the port.
+func ProbeKVM(ctx context.Context, ep *bmc.Endpoint, port int) (res trust.ProbeResult, tlsOffered bool, err error) {
+	if err := ep.AllowPort(port); err != nil {
+		return trust.ProbeResult{}, false, err
+	}
+	dial := func(ctx context.Context) (net.Conn, error) {
+		conn, err := ep.DialPort(ctx, port)
+		if err != nil {
+			return nil, err
+		}
+		_ = conn.SetDeadline(time.Now().Add(apcpHandshakeTimeout))
+		nonce := make([]byte, 32)
+		_, _ = rand.Read(nonce)
+		if _, err := conn.Write(apcpGreeting(channelModeControl, 2, 34, nonce)); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		caps, err := readAPCPReply(conn)
+		if err != nil {
+			conn.Close()
+			return nil, err
+		}
+		if caps&apcpCapTLS == 0 {
+			conn.Close()
+			return nil, errNoTLS
+		}
+		return conn, nil
+	}
+	res, err = trust.ProbeWithFallback(ctx, dial, ep.Host, "kvm")
+	if errors.Is(err, errNoTLS) {
+		return trust.ProbeResult{}, false, nil
+	}
+	return res, err == nil, err
+}
+
+var errNoTLS = errors.New("no TLS offered")
 
 // ConnectControl establishes Channel Mode 3 (Control/Auth) and performs cb authentication.
 func (c *Client) ConnectControl() error {
@@ -106,6 +166,10 @@ func (c *Client) ConnectControl() error {
 	binary.BigEndian.PutUint16(cbBuf[4:6], pktControlAuth)
 	binary.BigEndian.PutUint16(cbBuf[6:8], controlAuthLen)
 
+	if len(c.UserTokenStr) > maxTokenLen || len(c.PassTokenStr) > maxTokenLen {
+		conn.Close()
+		return fmt.Errorf("KVM tokens are longer than %d bytes", maxTokenLen)
+	}
 	payload := cbBuf[8:]
 	payload[0] = byte(len(c.UserTokenStr))
 	copy(payload[1:1+len(c.UserTokenStr)], []byte(c.UserTokenStr))

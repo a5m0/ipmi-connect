@@ -68,7 +68,7 @@ func fakeControl(t *testing.T, c *Client, user, pass string) <-chan []byte {
 }
 
 func TestRequestVMCredentials(t *testing.T) {
-	c := NewClient("192.0.2.10", "root", "pw")
+	c := NewClient(pinnedEndpoint(t, "192.0.2.10", nil), "root", "pw")
 	requests := fakeControl(t, c, "719885386", "1649760492")
 
 	user, pass, err := c.requestVMCredentials(context.Background())
@@ -137,7 +137,7 @@ func avmpBMC(t *testing.T, released chan<- struct{}) func(conn net.Conn) {
 func TestVirtualMediaThroughTheControlChannel(t *testing.T) {
 	released := make(chan struct{}, 1)
 	host, port := fakeAPCP(t, avmpBMC(t, released))
-	c := NewClient(host, "root", "pw")
+	c := NewClient(plainEndpoint(t, host, port), "root", "pw")
 	c.VPort = port
 	fakeControl(t, c, "719885386", "1649760492")
 
@@ -166,7 +166,7 @@ func TestVirtualMediaThroughTheControlChannel(t *testing.T) {
 }
 
 func TestNoVirtualMediaAfterLogout(t *testing.T) {
-	c := NewClient("192.0.2.10", "root", "pw")
+	c := NewClient(pinnedEndpoint(t, "192.0.2.10", nil), "root", "pw")
 	c.loggingOut.Store(true)
 	if _, err := c.openVMedia(context.Background()); err == nil {
 		t.Error("opened a virtual media session during logout")

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strconv"
 
 	"github.com/mhamzahkhan/ipmi-connect/internal/atenvm"
 	"github.com/mhamzahkhan/ipmi-connect/internal/vmedia"
@@ -17,6 +16,9 @@ const defaultVMediaPort = 623
 // JNLP token and its own connection; it never falls back to the real BMC password (that would
 // cross the network protected only by a public fixed RC4 key, i.e. effectively cleartext).
 func (c *Client) openVMedia(_ context.Context) (vmedia.Session, error) {
+	if !c.ep.InsecureChannelsAllowed() {
+		return nil, ErrInsecureChannels
+	}
 	connect := func(ctx context.Context) (net.Conn, atenvm.Credentials, error) {
 		ticket, err := c.web.FetchTicket(c.host)
 		if err != nil {
@@ -25,8 +27,7 @@ func (c *Client) openVMedia(_ context.Context) (vmedia.Session, error) {
 		if ticket.User == "" || ticket.Password == "" {
 			return nil, atenvm.Credentials{}, errors.New("BMC did not issue a virtual media login token")
 		}
-		addr := net.JoinHostPort(c.host, strconv.Itoa(defaultVMediaPort))
-		conn, err := c.dial(ctx, addr)
+		conn, err := c.dial(ctx, defaultVMediaPort)
 		if err != nil {
 			return nil, atenvm.Credentials{}, err
 		}

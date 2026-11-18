@@ -1,6 +1,8 @@
 package dell
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
@@ -21,7 +23,6 @@ const defaultKVMPort = 7578
 // socketWriteTimeout is generous on purpose: a timed-out write leaves a TLS connection unusable.
 const (
 	httpTimeout        = 10 * time.Second
-	dialTimeout        = 5 * time.Second
 	socketWriteTimeout = 5 * time.Second
 	heartbeatInterval  = 5 * time.Second
 	controlDrainPoll   = 2 * time.Second
@@ -38,7 +39,8 @@ var (
 
 // Client manages authentication, KVM sessions, and power controls for Dell C6220 II BMCs.
 type Client struct {
-	Host       string
+	Host       string // the BMC's host name or address, for logs and the JNLP request
+	ep         *bmc.Endpoint
 	User       string
 	Password   string
 	HTTPClient *http.Client
@@ -64,6 +66,9 @@ type Client struct {
 	ctrlWriteMu           sync.Mutex // serialises writes on CtrlConn
 	videoWriteMu          sync.Mutex // serialises writes on VideoConn
 	loggingOut            atomic.Bool
+	// plainChannels records that the BMC refused TLS on an APCP channel and the user had
+	// authorised unencrypted channels, for the security indicator.
+	plainChannels atomic.Bool
 
 	vmCreds chan []byte // 0x8434 payloads, handed from the control reader to openVMedia
 
@@ -71,17 +76,20 @@ type Client struct {
 	*vmedia.Manager
 }
 
-// NewClient creates a new Dell BMC client.
-func NewClient(host, user, pass string) *Client {
-	httpClient := bmc.NewLegacyHTTPClient(httpTimeout)
+// NewClient creates a client for the BMC at ep. Every connection it makes goes through ep, under
+// ep's trust policy.
+func NewClient(ep *bmc.Endpoint, user, pass string) *Client {
+	_ = ep.AllowPort(defaultKVMPort)
+	httpClient := ep.HTTPClient(httpTimeout)
 	c := &Client{
-		Host:         host,
+		Host:         ep.Host,
+		ep:           ep,
 		User:         user,
 		Password:     pass,
 		HTTPClient:   httpClient,
 		KMPort:       defaultKVMPort,
 		VPort:        defaultKVMPort,
-		ClientRandom: uint32(time.Now().UnixNano() & 0x7FFFFFFF),
+		ClientRandom: randomUint31(),
 		vmCreds:      make(chan []byte, 1),
 	}
 	c.Manager = vmedia.NewManager(c.openVMedia)
@@ -132,4 +140,15 @@ func (c *Client) Reconnect() error {
 
 	log.Printf("[Dell] Reconnection successful!")
 	return nil
+}
+
+// PlainChannels reports whether an APCP channel ran without TLS.
+func (c *Client) PlainChannels() bool { return c.plainChannels.Load() }
+
+// randomUint31 is the session's client random: unpredictable, so another client cannot guess
+// it to bind a video channel to this session.
+func randomUint31() uint32 {
+	var b [4]byte
+	_, _ = rand.Read(b[:]) // crypto/rand.Read never fails (Go 1.24+)
+	return binary.BigEndian.Uint32(b[:]) & 0x7FFFFFFF
 }

@@ -13,26 +13,49 @@ import (
 // is up to maxTypeRunes characters.
 const maxClientMessage = 6*maxTypeRunes + 1024 // JSON escapes a character as up to 6 bytes
 
-// handleWS streams video to one browser and forwards its input to the console. Accept rejects
-// cross-origin connections: only pages served by this server can open the socket.
+// statusSessionEnded tells the page that the BMC session it was showing has ended (disconnect),
+// so it goes back to the connection manager instead of reconnecting the socket.
+const statusSessionEnded websocket.StatusCode = 4000
+
+// handleWS streams video to one browser and forwards its input to the attached console. The
+// guard has already checked the Host, the Origin and the single-use ticket; Accept checks the
+// Origin again against the Host.
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+	b := s.bound()
+	if b == nil {
+		http.Error(w, "no BMC is connected", http.StatusConflict)
+		return
+	}
+	if s.clientCount() >= maxClients {
+		http.Error(w, "too many browser connections", http.StatusServiceUnavailable)
+		return
+	}
+	// Registered first so they run last: after the input release below.
 	s.connWG.Add(1)
-	defer s.connWG.Done() // registered first, so it runs after the input release below
+	defer s.connWG.Done()
+	b.wg.Add(1)
+	defer b.wg.Done()
 
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		log.Printf("[WS] Rejected connection: %v", err)
 		return
 	}
-	defer func() { _ = conn.CloseNow() }()
 	conn.SetReadLimit(maxClientMessage)
 
-	// Not r.Context(): the request is hijacked, so its context does not track the socket. Run
-	// cancels connCtx on shutdown.
-	ctx, cancel := context.WithCancel(s.connCtx)
+	// Not r.Context(): the request is hijacked, so its context does not track the socket. The
+	// binding's context ends on disconnect, logout and shutdown.
+	ctx, cancel := context.WithCancel(b.ctx)
 	defer cancel()
+	defer func() {
+		if b.ctx.Err() != nil {
+			_ = conn.Close(statusSessionEnded, "session ended")
+			return
+		}
+		_ = conn.CloseNow()
+	}()
 
-	client := newWSClient()
+	client := newWSClient(cancel)
 	go client.writeLoop(ctx, cancel, conn)
 
 	s.StateMu.RLock()
@@ -44,16 +67,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	s.attachClient(client)
 	defer s.removeClient(client)
 
-	var input *inputState
-	if s.Console != nil {
-		input = newInputState(s.Console)
-		input.typing = &s.typing
-		defer input.releaseAll() // a closed tab must not leave keys or buttons held on the host
-		// Ask the BMC for a complete frame even when a picture exists: reloading the page is how
-		// a user recovers one damaged by a lost or corrupt frame.
-		if err := s.Console.RequestFrameRefresh(); err != nil {
-			log.Printf("[WS] Refresh for new client: %v", err)
-		}
+	input := newInputState(b.console)
+	input.typing = &s.typing
+	defer input.releaseAll() // a closed tab must not leave keys or buttons held on the host
+	// Ask the BMC for a complete frame even when a picture exists: reloading the page is how
+	// a user recovers one damaged by a lost or corrupt frame.
+	if err := b.console.RequestFrameRefresh(); err != nil {
+		log.Printf("[WS] Refresh for new client: %v", err)
 	}
 
 	var typing context.CancelFunc // the paste this browser is typing, if any
@@ -67,8 +87,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-		if typ == websocket.MessageText && input != nil {
-			s.handleTyping(ctx, client, input, data, &typing)
+		s.touch()
+		if typ == websocket.MessageText {
+			s.handleTyping(ctx, b, client, input, data, &typing)
 			input.handle(data)
 		}
 	}

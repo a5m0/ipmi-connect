@@ -66,7 +66,7 @@ func TestPowerActionIsFollowedByQuickStatusPolls(t *testing.T) {
 }
 
 func httptestRequest(srv *Server, method, path, body string) *http.Request {
-	r, _ := http.NewRequest(method, "http://127.0.0.1"+path, strings.NewReader(body))
+	r, _ := http.NewRequest(method, "http://127.0.0.1:8080"+path, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	return authed(srv, r)
 }
@@ -75,10 +75,10 @@ func TestRepeatedPowerActionsShareOneFollower(t *testing.T) {
 	pc := &powerConsole{state: "OFF"}
 	srv, _ := mediaServer(t, pc)
 	srv.powerFollowEvery, srv.powerFollowFor = 10*time.Millisecond, 100*time.Millisecond
-	if !srv.startFollowPower() {
+	if !srv.startFollowPower(pc) {
 		t.Fatal("first follower did not start")
 	}
-	if srv.startFollowPower() {
+	if srv.startFollowPower(pc) {
 		t.Error("a second follower started instead of extending the first")
 	}
 }

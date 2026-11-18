@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -17,14 +18,15 @@ import (
 
 func startTestServer(t *testing.T, console bmc.Console) (*Server, string) {
 	t.Helper()
-	srv := NewServer(0, bmc.SessionState{ScreenWidth: 720, ScreenHeight: 400})
-	srv.Console = console
+	srv := newTestServer(bmc.SessionState{ScreenWidth: 720, ScreenHeight: 400})
+	srv.SetConsole(console)
 	h, err := srv.routes()
 	if err != nil {
 		t.Fatalf("routes: %v", err)
 	}
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
+	srv.setBoundPort(ts.Listener.Addr().(*net.TCPAddr).Port)
 	return srv, "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
 }
 
@@ -102,8 +104,8 @@ func TestWebSocketRequiresSession(t *testing.T) {
 
 // Full frames (raw RGBA) supersede each other, so a slow browser keeps only the newest.
 func TestBroadcastFullFrameKeepsOnlyLatest(t *testing.T) {
-	srv := NewServer(0, bmc.SessionState{})
-	c := newWSClient()
+	srv := newTestServer(bmc.SessionState{})
+	c := newWSClient(nil)
 	srv.addClient(c)
 
 	for i := 0; i < clientQueueLen+5; i++ {
@@ -122,15 +124,15 @@ func TestBroadcastFullFrameKeepsOnlyLatest(t *testing.T) {
 func TestRunReleasesHeldInputBeforeReturning(t *testing.T) {
 	fc := &fakeConsole{}
 	srv := NewServer(0, bmc.SessionState{})
-	srv.Console = fc
+	srv.SetConsole(fc)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- srv.Run(ctx, false) }()
+	go func() { done <- srv.Run(ctx, nil) }()
 	eventually(t, func() bool { return srv.boundPort() != 0 })
 
 	dialCtx, dialCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer dialCancel()
-	url := fmt.Sprintf("ws://127.0.0.1:%d/ws?t=%s", srv.boundPort(), srv.token)
+	url := fmt.Sprintf("ws://127.0.0.1:%d/ws?ticket=%s", srv.boundPort(), srv.auth.issueTicket())
 	conn, _, err := websocket.Dial(dialCtx, url, nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
@@ -156,8 +158,8 @@ func TestRunReleasesHeldInputBeforeReturning(t *testing.T) {
 }
 
 func TestBroadcastGivesClientsThatFallBehindTheFullPicture(t *testing.T) {
-	srv := NewServer(0, bmc.SessionState{})
-	slow, fast := newWSClient(), newWSClient()
+	srv := newTestServer(bmc.SessionState{})
+	slow, fast := newWSClient(nil), newWSClient(nil)
 	srv.addClient(slow)
 	srv.addClient(fast)
 	const w, h = 32, 16

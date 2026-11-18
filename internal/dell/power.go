@@ -2,7 +2,6 @@ package dell
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -19,7 +18,7 @@ func (c *Client) GetPowerState() (string, error) {
 		return bmc.PowerStateUnknown, fmt.Errorf("client not logged in")
 	}
 
-	urlStr := fmt.Sprintf("%s/data?get=pwState,&ST1=%s", bmc.BaseURL(c.Host), c.ST1Token)
+	urlStr := fmt.Sprintf("%s/data?get=pwState,&ST1=%s", c.ep.BaseURL(), c.ST1Token)
 	req, err := http.NewRequest("POST", urlStr, strings.NewReader(""))
 	if err != nil {
 		return bmc.PowerStateUnknown, err
@@ -35,7 +34,7 @@ func (c *Client) GetPowerState() (string, error) {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := readBody(resp)
 	if err != nil {
 		return bmc.PowerStateUnknown, err
 	}
@@ -60,7 +59,7 @@ func (c *Client) PowerControl(action bmc.PowerAction) error {
 	}
 
 	st1, st2 := c.csrfTokens()
-	urlStr := fmt.Sprintf("%s/data?ST1=%s&set=pwState:%s", bmc.BaseURL(c.Host), st1, stateStr)
+	urlStr := fmt.Sprintf("%s/data?ST1=%s&set=pwState:%s", c.ep.BaseURL(), st1, stateStr)
 	req, err := http.NewRequest("POST", urlStr, strings.NewReader(""))
 	if err != nil {
 		return bmc.FormatError("Dell PowerControl NewRequest", err)
@@ -77,12 +76,12 @@ func (c *Client) PowerControl(action bmc.PowerAction) error {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, _ := readBody(resp)
 	body := string(bodyBytes)
-	log.Printf("[Dell] PowerControl %s (code %s) -> %s", action, stateStr, strings.TrimSpace(body))
+	log.Printf("[Dell] PowerControl %s (code %s) -> %s", action, stateStr, snippet(body))
 
 	if !strings.Contains(body, "<status>ok</status>") {
-		return fmt.Errorf("power control rejected by BMC: %s", strings.TrimSpace(body))
+		return fmt.Errorf("power control rejected by BMC: %s", snippet(body))
 	}
 
 	return nil

@@ -60,9 +60,9 @@ func fakeRFB(t *testing.T) (addr string, conns chan net.Conn) {
 func TestClientConnectsDecodesAndLogsOutAfterTheSocket(t *testing.T) {
 	web := &fakeBMCWeb{password: "pw", sid: "0123456789abcdef"}
 	rfbAddr, _ := fakeRFB(t)
-	c := NewClient("192.0.2.20", "ADMIN", "pw")
+	c := NewClient(testEndpoint(t, "127.0.0.1", nil), "ADMIN", "pw")
 	c.web = newFakeWeb(t, web)
-	c.dial = func(ctx context.Context, _ string) (net.Conn, error) {
+	c.dial = func(ctx context.Context, _ int) (net.Conn, error) {
 		var d net.Dialer
 		return d.DialContext(ctx, "tcp", rfbAddr)
 	}
@@ -93,7 +93,7 @@ func TestClientConnectsDecodesAndLogsOutAfterTheSocket(t *testing.T) {
 
 func TestClientPowerUsesCGIWithoutASession(t *testing.T) {
 	web := &fakeBMCWeb{password: "pw", sid: "s"}
-	c := NewClient("192.0.2.20", "ADMIN", "pw")
+	c := NewClient(testEndpoint(t, "127.0.0.1", nil), "ADMIN", "pw")
 	c.web = newFakeWeb(t, web)
 	if err := c.Login(); err != nil {
 		t.Fatal(err)
@@ -129,14 +129,14 @@ func TestBackoff(t *testing.T) {
 }
 
 func TestClientVMediaIntegration(t *testing.T) {
-	c := NewClient("192.0.2.20", "ADMIN", "pw")
+	c := NewClient(testEndpoint(t, "127.0.0.1", nil), "ADMIN", "pw")
 	c.web = newFakeWeb(t, &fakeBMCWeb{password: "pw", sid: "0123456789abcdef"})
 	if err := c.web.Login(); err != nil { // the web session must be up for the JNLP token
 		t.Fatalf("web login: %v", err)
 	}
 
 	serverConnCh := make(chan net.Conn, 1)
-	c.dial = func(ctx context.Context, addr string) (net.Conn, error) {
+	c.dial = func(ctx context.Context, _ int) (net.Conn, error) {
 		cli, srv := net.Pipe()
 		serverConnCh <- srv
 		return cli, nil
