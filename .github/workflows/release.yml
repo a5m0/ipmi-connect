@@ -57,8 +57,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EXPECTED_VERSION: next-version-dry-run # see verifyReleaseCmd in .releaserc.json
         run: |
-          out=$("$SEMANTIC_RELEASE" --dry-run --no-ci 2>&1 || true)
-          echo "$out" | tail -20
+          # A failure here (bad config, broken plugin, no push access) would also fail the real
+          # release, so the dry run must fail too.
+          status=0
+          out=$("$SEMANTIC_RELEASE" --dry-run --no-ci 2>&1) || status=$?
+          echo "$out" | tail -40
+          if [ "$status" -ne 0 ]; then echo "::error::semantic-release failed (exit $status)."; exit "$status"; fi
           v=$(echo "$out" | sed -n 's/.*The next release version is \([0-9][0-9A-Za-z.+-]*\).*/\1/p' | head -1)
           if [ -z "$v" ]; then echo "No release is due (no feat/fix commits since the last tag)."; exit 1; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
