@@ -6,6 +6,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"image"
+	"image/draw"
+	"image/png"
 	"os"
 	"os/signal"
 	"strings"
@@ -112,6 +115,7 @@ func (s *sessions) Connect(ctx context.Context, req session.Request) (session.St
 	s.mu.Lock()
 	s.phase, s.stop = session.PhaseConnected, cancel
 	s.mu.Unlock()
+	screen := loadScreen()
 	go func() {
 		w, h, interval := 320, 200, 200*time.Millisecond
 		// FAKEAPP_STRESS=1024x768@30 streams a full-screen change at that rate instead, to
@@ -133,7 +137,11 @@ func (s *sessions) Connect(ctx context.Context, req session.Request) (session.St
 					pix[i], pix[i+1], pix[i+2] = 18, 18, 18
 				}
 			}
-			s.server.UpdateScreen(w, h, pix)
+			if screen != nil { // a fixed picture instead of the generated one
+				s.server.UpdateScreen(screen.Rect.Dx(), screen.Rect.Dy(), screen.Pix)
+			} else {
+				s.server.UpdateScreen(w, h, pix)
+			}
 			select {
 			case <-runCtx.Done():
 				return
@@ -155,6 +163,28 @@ func (s *sessions) Disconnect() {
 	}
 }
 
+// loadScreen reads FAKEAPP_SCREEN, a PNG shown as the host's screen in documentation shots.
+func loadScreen() *image.RGBA {
+	path := os.Getenv("FAKEAPP_SCREEN")
+	if path == "" {
+		return nil
+	}
+	f, err := os.Open(path) //nolint:gosec // test tool; the path comes from its operator
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return nil
+	}
+	defer f.Close()
+	img, err := png.Decode(f)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return nil
+	}
+	rgba := image.NewRGBA(img.Bounds().Sub(img.Bounds().Min))
+	draw.Draw(rgba, rgba.Rect, img, img.Bounds().Min, draw.Src)
+	return rgba
+}
+
 func main() {
 	if os.Getenv("FAKEAPP_DOCS") == "1" {
 		useDocsValues()
@@ -167,8 +197,28 @@ func main() {
 	srv.Media = web.NewMediaRoots(os.TempDir())
 	sess := &sessions{server: srv, phase: session.PhaseIdle}
 	srv.Sessions = sess
+	if os.Getenv("FAKEAPP_CONNECTED") == "1" { // start on the console, past the consent dialog
+		if _, err := sess.Connect(context.Background(), session.Request{Password: "test-password",
+			TrustFingerprints: []string{fakeFingerprint}, AllowLegacyTLS: true, AllowInsecureChannels: true}); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	srv.OnShutdown = stop
-	_ = srv.Run(ctx, func(url string) { fmt.Println(url) })
+	if os.Getenv("FAKEAPP_WINDOW") != "1" {
+		_ = srv.Run(ctx, func(url string) { fmt.Println(url) })
+		return
+	}
+	// The server in the background and the window on the main goroutine, as in the desktop build.
+	links := make(chan string, 1)
+	go func() {
+		_ = srv.Run(ctx, func(url string) { fmt.Println(url); links <- url })
+		os.Exit(0)
+	}()
+	if err := openWindow(<-links); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }

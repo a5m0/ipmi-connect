@@ -25,6 +25,22 @@ Writable checkbox (images are now read-only by default). The connection manager,
 security pictures come from the scripted test app (`node test/e2e/screenshots.mjs`), with a
 documentation address.
 
+### Desktop window
+
+The Flatpak and the `ipmi-connect-desktop` binary show the same interface in a native window
+(GTK4 and WebKitGTK) instead of a browser tab.
+
+| Connection manager | First connection |
+| :---: | :---: |
+| ![The connection manager in the native desktop window](docs/images/desktop-connection-manager.png) | ![The certificate and protocol consent dialog in the desktop window](docs/images/desktop-consent.png) |
+
+| Console | Type text on the host |
+| :---: | :---: |
+| ![The console in the desktop window showing a Linux shell](docs/images/desktop-console.png) | ![The type-text panel docked under the console, with a command ready to type and Press Enter after ticked](docs/images/desktop-type-text.png) |
+
+The desktop pictures come from the same test app in the native window
+(`test/e2e/desktop-screenshots.sh`); the host's screen is a picture taken from a real session.
+
 ## Supported hardware
 
 It has been tested on the two boards I own. Other BMCs running the same firmware families may work, but I can't promise anything.
@@ -44,12 +60,14 @@ It has been tested on the two boards I own. Other BMCs running the same firmware
 | Power control | Works | Status verified; commands over the KVM socket or `ipmi.cgi` |
 | Virtual media | Works: ISO on CD/DVD (booted an installer), IMG on removable or floppy (read-write), Create Image, transfer graph, USB reset | Works: ISO on CD, IMG on removable or floppy (read-write), Create Image (blank or from a folder), all verified byte-exact on hardware; one drive at a time, see known issues |
 
-The console also has typed paste (send your clipboard as keystrokes), screenshots, scaling and fullscreen with keyboard lock.
+The console also has a **type text** panel (paste or write text, and it is typed on the host as
+keystrokes, optionally followed by Enter; Ctrl/Cmd+Shift+V on the console types the clipboard
+straight away), screenshots, scaling and fullscreen with keyboard lock.
 
 ## Install
 
 Pick one. Each release attaches native archives for Linux and macOS (amd64, arm64), Flatpak
-bundles (x86_64, aarch64), `sha256sums.txt`, a CycloneDX SBOM and build-provenance attestations;
+bundles (x86_64, aarch64), `sha256sums.txt`, CycloneDX SBOMs and build-provenance attestations;
 see [Verify a release](#verify-a-release).
 
 ### Standalone executable (Linux, macOS)
@@ -60,6 +78,15 @@ tar -xzf ipmi-connect_<version>_linux_amd64.tar.gz
 
 ```bash
 install -Dm755 ipmi-connect ~/.local/bin/ipmi-connect
+```
+
+The Linux archives also carry `ipmi-connect-desktop`, the same program with its own window
+(see [Desktop window](#desktop-window)) instead of a browser tab. It needs GTK 4.8+ and
+WebKitGTK 6.0 (`libgtk-4-1` and `libwebkitgtk-6.0-4`: Debian 12, Ubuntu 24.04, Fedora 38 or
+newer) and says which package is missing if they are not installed:
+
+```bash
+install -Dm755 ipmi-connect-desktop ~/.local/bin/ipmi-connect-desktop
 ```
 
 On macOS, use the `darwin` archive; the first run may need **System Settings → Privacy &

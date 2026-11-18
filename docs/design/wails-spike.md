@@ -79,7 +79,7 @@ will do better than both.
 | Screenshot button | `<a download>` is silently dropped by WebKitGTK, so the window build saves through Go: `POST /api/screenshot/save` encodes the server's own copy of the screen and shows the native Save dialog. Driven under Xvfb: the GTK file chooser appears with the suggested name and the file is written |
 | Dropping a file or link on the window | Refused by the page (a drop would otherwise navigate away from the console); also applies in browsers |
 | `window.open` | Returns null; no window opens |
-| `<select>` styling | Native GTK widget, light on the dark theme (see image); needs CSS |
+| `<select>` styling | Was a native GTK widget, light on the dark theme (see image). Now drawn by the page (`appearance: none`, `color-scheme: dark`, an inline SVG arrow), dark in WebKitGTK and Chromium. The open list is still a GTK popover and follows the desktop's theme |
 | Memory | Main process about 290 MB RSS with software GL, plus WebKit's network and web processes (each in WebKit's own bubblewrap sandbox) |
 
 ## Security notes
@@ -143,9 +143,14 @@ needs a Mac to build. Before shipping on macOS:
 
 - Window close while a BMC session is active was not tested under Xvfb (no window manager);
   SIGTERM was.
-- Release archives still carry only the browser build; adding `ipmi-connect-desktop` for Linux
-  is one more `go build` line in `scripts/build-release.sh` once it has had real-desktop use.
-- The `<select>` styling for WebKit.
+- Done: the Linux release archives (amd64, arm64) carry `ipmi-connect-desktop` beside the
+  browser build, with its own SBOM (`ipmi-connect-desktop_<version>.cdx.json`), since it links
+  Wails. macOS archives still carry only the browser build (see above).
+- Done: the `<select>` styling for WebKit (see the table above).
+- Documentation screenshots of the window: `test/e2e/desktop-screenshots.sh` runs the e2e fake
+  app in the window under Xvfb and drives it with xdotool. WebKitGTK ignores XTEST clicks unless
+  `GDK_CORE_DEVICE_EVENTS=1`, and a click on a text field leaves it selecting text, so the script
+  fills the form with the keyboard.
 
 The browser build stays: CLI use, ChromeOS/Crostini without a Linux desktop, and machines
 without GTK4/WebKitGTK still need it.
