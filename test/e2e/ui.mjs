@@ -77,6 +77,36 @@ try {
   await page.click('#btnSecurityDone');
   ok('security indicator reports the unencrypted KVM and pinned certificate');
 
+  // The type-text panel docks under the console and types its text on the host.
+  await page.click('#btnPaste');
+  await page.waitForSelector('#pastePanel:not([hidden])');
+  await page.fill('#pasteText', 'echo hello');
+  await page.check('#pasteEnter');
+  await page.click('#btnPasteType');
+  await page.waitForSelector('.toast >> text=Typed 11 characters', { timeout: 10000 });
+  if (await page.inputValue('#pasteText')) fail('typed text left in the box without Keep text');
+  if (!(await page.isVisible('#screenCanvas'))) fail('the type panel hid the console');
+  await page.check('#pasteKeep');
+  await page.fill('#pasteText', 'ls');
+  await page.focus('#pasteText');
+  await page.keyboard.press('Control+Enter');
+  await page.waitForSelector('.toast >> text=Typed 3 characters', { timeout: 10000 });
+  if (await page.inputValue('#pasteText') !== 'ls') fail('Keep text did not keep the text');
+  await page.click('#btnClosePaste');
+  if (await page.isVisible('#pastePanel')) fail('the type panel did not close');
+  ok('type panel types its text (with Enter), keeps it on request, and closes');
+
+  // Secondary buttons look like buttons, and selects are drawn by the page in the dark theme.
+  const look = await page.evaluate(() => {
+    const btn = getComputedStyle(document.getElementById('btnSecurityDone'));
+    const sel = getComputedStyle(document.getElementById('cVendor'));
+    return { border: btn.borderTopStyle !== 'none' && btn.borderTopColor !== 'rgba(0, 0, 0, 0)',
+      bg: btn.backgroundColor !== 'rgba(0, 0, 0, 0)', appearance: sel.appearance, scheme: sel.colorScheme };
+  });
+  if (!look.border || !look.bg) fail(`secondary button has no outline or fill: ${JSON.stringify(look)}`);
+  if (look.appearance !== 'none' || look.scheme !== 'dark') fail(`select not themed: ${JSON.stringify(look)}`);
+  ok('secondary buttons are outlined and selects use the dark theme');
+
   // The socket refuses the long-lived token in its URL and a cross-origin page.
   const token = await page.evaluate(() => sessionStorage.getItem('ipmi-connect-token'));
   const wsRefused = await page.evaluate(async (t) => new Promise((res) => {

@@ -144,6 +144,25 @@
       </div>
     </main>
 
+    <!-- Type text: a docked panel, so the console stays visible while the text is typed -->
+    <section class="type-panel" id="pastePanel" aria-label="Type text on the host" hidden>
+      <div class="type-panel-head">
+        <span class="type-panel-title">Type text on the host</span>
+        <span class="type-panel-hint">Typed as a US keyboard layout, about 40 characters a second; characters a US keyboard has no key for are skipped. Ctrl+Enter types.</span>
+        <button class="btn-close" id="btnClosePaste" title="Close">&times;</button>
+      </div>
+      <textarea class="paste-text" id="pasteText" rows="3" spellcheck="false" autocomplete="off" placeholder="Paste or write text here, then Type It to send it as keystrokes…"></textarea>
+      <div class="type-panel-actions">
+        <button type="button" class="btn btn-secondary" id="btnPasteClipboard" title="Replace the text with the clipboard">From Clipboard</button>
+        <button type="button" class="btn btn-secondary" id="btnPasteClear">Clear</button>
+        <label class="media-check" title="Press Enter after the text, e.g. to run a command"><input type="checkbox" id="pasteEnter"> Press Enter after</label>
+        <label class="media-check" title="Leave the text here after it is typed, to send it again"><input type="checkbox" id="pasteKeep"> Keep text</label>
+        <span class="paste-count" id="pasteCount"></span>
+        <button type="button" class="btn btn-danger" id="btnPasteCancel" hidden>Stop Typing</button>
+        <button type="button" class="btn btn-primary" id="btnPasteType">Type It</button>
+      </div>
+    </section>
+
     <!-- Connection manager: shown whenever no BMC is connected -->
     <section class="connect-view" id="connectView" hidden>
       <div class="connect-card">
@@ -297,24 +316,6 @@
         <div class="modal-footer media-footer">
           <button class="btn btn-secondary" id="btnUsbReset" title="Reconnect the virtual media USB device on the host (about a second); mapped images stay mapped, keyboard and mouse are not affected">USB Reset</button>
           <button class="btn btn-secondary" id="btnMediaDone">Close</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="modal-backdrop" id="pasteModal">
-      <div class="modal-card">
-        <div class="modal-header">
-          <div class="modal-title"><h3>Type Text on the Host</h3></div>
-          <button class="btn-close" id="btnClosePaste">&times;</button>
-        </div>
-        <div class="modal-body">
-          <textarea class="paste-text" id="pasteText" rows="8" spellcheck="false" placeholder="Text to type as keystrokes…"></textarea>
-          <p class="modal-description">Typed as a US keyboard layout, about 40 characters a second. Characters a US keyboard has no key for are skipped.</p>
-          <span class="paste-count" id="pasteCount"></span>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" id="btnPasteCancel">Cancel</button>
-          <button class="btn btn-secondary" id="btnPasteType">Type It</button>
         </div>
       </div>
     </div>
