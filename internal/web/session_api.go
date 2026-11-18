@@ -193,6 +193,6 @@ func (s *Server) handleTrustForget(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, err)
 		return
 	}
-	log.Printf("[Trust] Forgot certificates and consents for %s at the user's request", trust.DeviceKey(device))
+	log.Printf("[Trust] Forgot certificates and consents for %q at the user's request", trust.DeviceKey(device))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "forgotten"})
 }
