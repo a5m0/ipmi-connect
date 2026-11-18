@@ -59,6 +59,7 @@ import { setupView } from '/view.js';
   let connectView = null; // the connection manager
   let media = null;       // the virtual media panel
   let phase = '';         // the server's session phase
+  let sessionEnded = false; // the server said the console socket is ending on purpose
 
   async function ensureSession() {
     try { localStorage.removeItem(TOKEN_KEY); } catch (e) { /* older versions kept it there */ }
@@ -261,7 +262,8 @@ import { setupView } from '/view.js';
     ws.onclose = (ev) => {
       if (paste) paste.reset();
       if (signedOut) return;
-      if (ev.code === 4000 || ev.code === 1008) { // session ended (disconnect) or signed out
+      if (sessionEnded) { // disconnected or signed out: the status poll decides what to show
+        sessionEnded = false;
         isConnected = false;
         pollStatus();
         return;
@@ -298,6 +300,8 @@ import { setupView } from '/view.js';
       statRes.textContent = `Resolution: ${msg.width} x ${msg.height}`;
     } else if (msg.type === 'status') {
       overlayStatus.textContent = msg.text || 'Processing...';
+    } else if (msg.type === 'session-ended') {
+      sessionEnded = true; // the BMC was disconnected or the browser signed out: do not reconnect
     } else if (msg.type === 'typed') {
       paste.onResult(msg);
     } else if (msg.type === 'ping') {

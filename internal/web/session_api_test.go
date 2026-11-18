@@ -108,13 +108,16 @@ func TestDetachReleasesHeldInputAndEndsSockets(t *testing.T) {
 	if keys, _ := fc.snapshot(); !reflect.DeepEqual(keys, []keyEvent{{true, 225}, {false, 225}}) {
 		t.Errorf("keys after Detach = %v", keys)
 	}
+	ended := false
 	for {
-		if _, _, err := conn.Read(ctx); err != nil {
-			if websocket.CloseStatus(err) != statusSessionEnded {
-				t.Errorf("close status %v, want %d (session ended)", websocket.CloseStatus(err), statusSessionEnded)
-			}
+		_, data, err := conn.Read(ctx)
+		if err != nil {
 			break
 		}
+		ended = ended || (strings.Contains(string(data), `"type":"session-ended"`) && strings.Contains(string(data), `"reason":"session ended"`))
+	}
+	if !ended {
+		t.Error("the page was not told that the session ended")
 	}
 	if srv.console() != nil {
 		t.Error("console still attached")

@@ -14,11 +14,7 @@ import (
 // is up to maxTypeRunes characters.
 const maxClientMessage = 6*maxTypeRunes + 1024 // JSON escapes a character as up to 6 bytes
 
-// statusSessionEnded tells the page that the BMC session it was showing has ended (disconnect),
-// so it goes back to the connection manager instead of reconnecting the socket.
-const statusSessionEnded websocket.StatusCode = 4000
-
-// closeGrace bounds the wait for a browser to answer the close handshake.
+// closeGrace bounds the last message to a browser whose socket is being closed.
 const closeGrace = time.Second
 
 // handleWS streams video to one browser and forwards its input to the attached console. The
@@ -54,26 +50,29 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	// Not r.Context(): the request is hijacked, so its context does not track the socket. ctx
 	// ends on disconnect and shutdown (the binding) or logout (client.close). Reads use their
-	// own context, because cancelling a read's context drops the connection without a close
-	// frame; the watcher below sends one saying why, which also ends the read.
+	// own context: the watcher below first tells the page why the socket is ending, then
+	// cancels the read, which drops the connection.
 	ctx, cancel := context.WithCancel(b.ctx)
 	defer cancel()
 	readCtx, readCancel := context.WithCancel(context.Background())
 	defer readCancel()
+	watcherDone := make(chan struct{})
+	// Runs after the input release below and before CloseNow: lets the watcher's last message
+	// go out (bounded by closeGrace).
+	defer func() { cancel(); <-watcherDone }()
 	go func() {
+		defer close(watcherDone)
 		<-ctx.Done()
-		code, reason := websocket.StatusPolicyViolation, "signed out"
+		// Tell the page why before dropping the connection. (A close frame would also say it,
+		// but a close handshake racing the read loop can send two, which browsers reject.)
+		reason := "signed out"
 		if b.ctx.Err() != nil {
-			code, reason = statusSessionEnded, "session ended"
+			reason = "session ended"
 		}
-		// Held input is released when the read loop ends: wait for the close handshake only
-		// briefly, so an unresponsive browser cannot delay that (or Detach).
-		closed := make(chan struct{})
-		go func() { _ = conn.Close(code, reason); close(closed) }()
-		select {
-		case <-closed:
-		case <-time.After(closeGrace):
-		}
+		msg, _ := json.Marshal(map[string]string{"type": "session-ended", "reason": reason})
+		wctx, wcancel := context.WithTimeout(context.Background(), closeGrace)
+		_ = conn.Write(wctx, websocket.MessageText, msg)
+		wcancel()
 		readCancel()
 	}()
 
