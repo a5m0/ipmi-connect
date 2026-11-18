@@ -216,7 +216,7 @@ pinning `InsecureSkipVerify` (`trust.go`) and the request to the BMC the user ch
 - Physical hardware is not available in this environment; every protocol-facing change is tested
   against fakes only. See [testing/hardware-validation.md](testing/hardware-validation.md).
 - The Flathub ID question (D10) is the owner's decision.
-- Renovate's `assignees` still names the upstream author (inherited from the fork).
+- Dependency updates moved from Renovate (never installed on this repository) to Dependabot (`.github/dependabot.yml`).
 
 ## Follow-up
 
