@@ -1,4 +1,7 @@
 :root {
+  /* Dark form controls, scrollbars and pickers in every engine (WebKitGTK draws them with GTK). */
+  color-scheme: dark;
+  accent-color: var(--accent);
   --bg-primary: #0a0c10;
   --bg-secondary: #12161f;
   --bg-tertiary: #1a202c;
@@ -155,6 +158,11 @@ body {
   color: var(--text-secondary);
 }
 
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .btn svg {
   width: 14px;
   height: 14px;
@@ -227,6 +235,22 @@ body {
 }
 
 .btn-icon.active {
+  background-color: rgba(56, 189, 248, 0.18);
+  color: var(--accent);
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+/* Header actions are outlined, like the icon buttons beside them, so they read as buttons. */
+.header-right .btn {
+  background-color: var(--bg-tertiary);
+  border-color: var(--border-color);
+}
+
+.header-right .btn:hover {
+  border-color: var(--border-highlight);
+}
+
+.header-right .btn.active {
   background-color: rgba(56, 189, 248, 0.18);
   color: var(--accent);
   border-color: rgba(56, 189, 248, 0.45);
@@ -598,7 +622,7 @@ body {
 #toasts {
   position: fixed;
   right: 16px;
-  bottom: 16px;
+  bottom: calc(16px + var(--type-panel-height, 0px));
   z-index: 200;
   display: flex;
   flex-direction: column;
@@ -922,6 +946,22 @@ canvas {
   pointer-events: none;
 }
 
+.btn-secondary {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--border-highlight);
+}
+
+.btn-secondary:hover {
+  background-color: var(--border-color);
+  border-color: var(--text-muted);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .btn-danger {
   background-color: rgba(239, 68, 68, 0.15);
   color: var(--danger);
@@ -1033,3 +1073,77 @@ canvas {
 
 /* Explanatory text under a table in a dialog. */
 .media-table + .modal-description { margin-top: 14px; }
+
+/* Selects are drawn by the page, not the platform: WebKitGTK otherwise uses a light GTK widget
+   on the dark theme. The arrow is an inline SVG (the CSP allows data: images). The extra
+   selectors outrank the component rules above, whose background shorthands would drop it. */
+select, .connect-form select, .media-create select, .media-table select {
+  -webkit-appearance: none;
+  appearance: none;
+  color: var(--text-primary);
+  background-color: var(--bg-tertiary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%2394a3b8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 10px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding-right: 28px !important;
+  cursor: pointer;
+}
+select:hover { border-color: var(--border-highlight); }
+select option { background-color: var(--bg-tertiary); color: var(--text-primary); }
+.media-create select, .media-table select { background-position: right 8px center; }
+.picker-bar select {
+  font: 12px var(--font-sans);
+  padding: 6px 10px;
+  max-width: 40%;
+}
+
+/* Docked "type text" panel under the console. */
+.type-panel {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  background-color: var(--bg-card);
+  border-top: 1px solid var(--border-color);
+  user-select: text;
+}
+.type-panel-head { display: flex; align-items: baseline; gap: 12px; }
+.type-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.type-panel-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.type-panel .paste-text { min-height: 56px; max-height: 40vh; }
+.type-panel .paste-text:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.type-panel-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.type-panel-actions .paste-count { margin-left: auto; }
+
+/* Narrow windows (the desktop window opens at 1280 px): labels give way before buttons wrap or
+   fall off the edge. Every button keeps its title as a tooltip. */
+.app-header .btn, .security-badge, .power-pill { white-space: nowrap; flex-shrink: 0; }
+.header-left { min-width: 0; }
+@media (max-width: 1500px) {
+  .power-bar .btn span { display: none; }
+  .power-bar .btn { padding: 6px 8px; }
+}
+@media (max-width: 1100px) {
+  .brand-name { display: none; }
+  .header-right .btn > span:not(.media-badge) { display: none; }
+  .header-right .btn { padding: 8px; }
+}
