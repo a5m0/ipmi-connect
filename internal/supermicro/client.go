@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
-	"github.com/mhamzahkhan/ipmi-connect/internal/vmedia"
+	"github.com/a5m0/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/vmedia"
 )
 
 const (
@@ -232,7 +232,7 @@ func (c *Client) RequestFrameRefresh() error {
 func (c *Client) PowerControl(action bmc.PowerAction) error {
 	if code, ok := inBandPower[action]; ok {
 		if s, err := c.current(); err == nil {
-			log.Printf("[Supermicro] Power %s sent over the KVM connection", action)
+			log.Printf("[Supermicro] Power %q sent over the KVM connection", action)
 			return s.power(code)
 		}
 	}
