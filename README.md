@@ -12,9 +12,18 @@ ipmi-connect talks to the BMCs' own KVM and virtual media protocols directly and
 
 ## Screenshots
 
-| Virtual media | Power control |
+| Connection manager | First connection: certificate and protocol consent |
 | :---: | :---: |
-| ![Virtual media panel with a Debian ISO attached as a CD](docs/images/virtual-media.png) | ![Confirmation dialog for a hard reset](docs/images/power-confirm.png) |
+| ![Connection manager with a saved device and the connect form](docs/images/connection-manager.png) | ![Dialog showing an untrusted BMC certificate's fingerprint, obsolete TLS and unencrypted channels, each to be confirmed](docs/images/consent.png) |
+
+| Connection security | Virtual media | Power control |
+| :---: | :---: | :---: |
+| ![Connection security details: obsolete TLS with a pinned certificate on the web interface, unencrypted KVM and virtual media](docs/images/security.png) | ![Virtual media panel with a Debian ISO attached as a CD](docs/images/virtual-media.png) | ![Confirmation dialog for a hard reset](docs/images/power-confirm.png) |
+
+The console and virtual media pictures predate the security badge, the Disconnect button and the
+Writable checkbox (images are now read-only by default). The connection manager, consent and
+security pictures come from the scripted test app (`node test/e2e/screenshots.mjs`), with a
+documentation address.
 
 ## Supported hardware
 

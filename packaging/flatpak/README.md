@@ -66,8 +66,13 @@ repository is set up by this project; releases only attach bundles.
 
 In development (2026-11-18, x86_64 container): `flatpak-builder` 1.4.2 built the manifest
 offline; `desktop-file-validate` and `appstreamcli validate` passed; the bundle installed; and
-`smoke-test.sh` passed. aarch64 is built and smoke-tested only in CI (`.github/workflows/flatpak.yml`
-on `ubuntu-24.04-arm`); it was not run in development.
+`smoke-test.sh` passed. aarch64 was not run in development.
+
+In CI (`.github/workflows/flatpak.yml`, first runs on the draft pull request, 2026-11-18): both
+x86_64 (`ubuntu-24.04`) and aarch64 (`ubuntu-24.04-arm`) build offline, install the bundle and pass
+`smoke-test.sh`. The first x86_64 run failed when flatpak-github-actions updated the image's
+preinstalled runtimes ("Invalid cross-device link"); the workflow now installs the SDK into a
+user installation and runs `flatpak-builder` directly.
 
 ## Flathub
 

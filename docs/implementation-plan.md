@@ -115,7 +115,7 @@ Dependencies flow top to bottom. Each item lists its acceptance criteria.
 - [x] 8 Virtual media confinement (media roots, open-and-compare, read-only default)
 - [x] 9 Portals (OpenURI, FileChooser) — **[platform]** dialogs not exercised on a desktop
 - [x] 10 Flatpak (built and smoke-tested on x86_64; aarch64 in CI only)
-- [x] 11 CI/release (workflows written and actionlint-clean; **not yet run on GitHub**)
+- [x] 11 CI/release (CI green on GitHub except CodeQL's two by-design alerts; the manual release workflow has not been run)
 - [x] 12 Documentation
 - [x] Independent security review and fixes
 
@@ -186,8 +186,30 @@ Dependencies flow top to bottom. Each item lists its acceptance criteria.
 | Release script | `scripts/build-release.sh 0.0.0-local` | 4 archives, Flatpak, CycloneDX SBOM, checksums |
 | Workflows | `actionlint` v1.7.12; every action pinned to a commit SHA | pass |
 
-Not run here: the GitHub Actions workflows themselves (including aarch64 Flatpak, CodeQL,
-attestations), macOS, any real BMC, portal dialogs on a desktop, ChromeOS.
+Not run anywhere yet: the release workflow (attestations, SBOM upload), the binaries on macOS
+(CI only cross-compiles them), any real BMC, portal dialogs on a desktop, ChromeOS.
+
+## CI on GitHub (draft pull request a5m0/ipmi-connect#1)
+
+First run (85d6d5c) and fixes:
+
+| Job | Failure | Fix |
+| :--- | :--- | :--- |
+| Test (race) | `TestDisconnectWaitsForALateLoginToBeLoggedOut` disconnected while the attempt was still probing TLS | The test waits until the login has started |
+| Vulnerabilities | govulncheck ran on Go 1.27.2: `GOTOOLCHAIN=local` blocked the switch to `toolchain go1.27.4` | `GOTOOLCHAIN: auto` |
+| Dependency review | `Forbidden` from the dependency-graph API | Owner enabled the dependency graph |
+| Flatpak x86_64 | flatpak-github-actions failed updating the image's runtimes (EXDEV) | Install the SDK per user, run flatpak-builder directly |
+| CodeQL | 20 alerts | See below |
+
+On cc6abdd all 24 CI jobs passed: lint, race tests, govulncheck and licences, dependency review,
+13 fuzz targets, the browser UI test, Linux and macOS cross-builds, and the Flatpak build and
+smoke test on x86_64 and aarch64.
+
+CodeQL went from 20 alerts to 2. Fixed: log lines now quote user- and BMC-supplied strings, the
+port is bounded at its `uint16` conversion, and `MediaRoots` returns paths rebuilt from the root
+and a `filepath.IsLocal` relative path (no behaviour change). Left for the owner, by design: the
+pinning `InsecureSkipVerify` (`trust.go`) and the request to the BMC the user chose
+(`session/vendor.go`).
 
 ## Blockers and open questions
 
