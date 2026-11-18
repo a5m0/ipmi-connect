@@ -15,20 +15,31 @@ flatpak run "$APP" --version | grep -q '^ipmi-connect ' || fail "--version"
 pass "runs in the sandbox: $(flatpak run "$APP" --version)"
 
 perms=$(flatpak info --show-permissions "$APP")
-grep -q 'shared=network' <<<"$perms" || fail "network permission missing"
-grep -qE '^(filesystems|devices|sockets)=' <<<"$perms" && fail "unexpected permissions: $perms"
-pass "permissions are network only"
+# The value of one permission line as sorted words: Flatpak versions differ in order, and older
+# ones write --socket=fallback-x11 as "x11;wayland;fallback-x11".
+perm() { sed -n "s/^$1=//p" <<<"$perms" | tr ';' '\n' | sed '/^$/d' | LC_ALL=C sort | tr '\n' ' '; }
+[[ $(perm shared) == "ipc network " ]] || fail "shared: $(perm shared)"
+[[ $(perm devices) == "dri " ]] || fail "devices: $(perm devices)"
+sockets=$(perm sockets)
+[[ $sockets == "fallback-x11 wayland " || $sockets == "fallback-x11 wayland x11 " ]] || fail "sockets: $sockets"
+grep -qE '^(filesystems|persistent)=' <<<"$perms" && fail "unexpected permissions: $perms"
+grep -qE '^\[(Session|System) Bus Policy\]' <<<"$perms" && fail "unexpected bus names: $perms"
+pass "permissions are network, display and GPU only"
+
+flatpak run --command=sh "$APP" -c 'ls /usr/lib/*/libwebkitgtk-6.0.so.4 /usr/lib/*/libgtk-4.so.1 >/dev/null' \
+  || fail "the runtime lacks GTK4 or WebKitGTK 6.0"
+pass "the runtime provides GTK4 and WebKitGTK 6.0"
 
 # Confinement: the sandbox cannot see the user's files, container sockets or hardware.
 echo secret >"$secret"
 flatpak run --command=sh "$APP" -c "test ! -e '$secret'" || fail "the sandbox can read a file in \$HOME"
 flatpak run --command=sh "$APP" -c 'test ! -e /var/run/docker.sock && test ! -e /run/podman && test ! -e "$HOME/.ssh/id_rsa"' \
   || fail "the sandbox can see sockets or SSH keys"
-flatpak run --command=sh "$APP" -c 'test ! -e /dev/bus/usb && test ! -e /dev/dri && test ! -e /dev/sda && test ! -e /dev/nvme0n1' \
+flatpak run --command=sh "$APP" -c 'test ! -e /dev/bus/usb && test ! -e /dev/sda && test ! -e /dev/nvme0n1' \
   || fail "the sandbox can see host devices"
 flatpak run --command=sh "$APP" -c '! command -v flatpak-spawn >/dev/null || ! flatpak-spawn --host true 2>/dev/null' \
   || fail "the sandbox can run host commands"
-pass "no access to home files, SSH keys, container sockets, devices or host commands"
+pass "no access to home files, SSH keys, container sockets, devices other than the GPU, or host commands"
 
 flatpak run "$APP" --desktop --no-browser --idle-timeout 5m >"$log" 2>&1 &
 pid=$!
@@ -64,3 +75,25 @@ for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
 kill -0 "$pid" 2>/dev/null && fail "did not quit"
 pid=
 pass "quit from the API"
+
+# The window, where there is a display to draw on: it starts WebKit's sandboxed web process,
+# and quits cleanly on SIGTERM (logging out of any BMC first). Skipped without xvfb-run.
+# WebKit hands its sandbox arguments to flatpak-spawn, which refuses them without a UTF-8
+# locale; desktops always have one, bare CI containers often don't.
+if command -v xvfb-run >/dev/null; then
+  winlog=$(mktemp)
+  LANG=${LANG:-C.UTF-8} env -u WAYLAND_DISPLAY xvfb-run -a flatpak run "$APP" --idle-timeout 5m >"$winlog" 2>&1 &
+  pid=$!
+  for _ in $(seq 1 60); do pgrep -f 'webkitgtk-6.0/WebKitWebProcess' >/dev/null && break; sleep 0.5; done
+  pgrep -f 'webkitgtk-6.0/WebKitWebProcess' >/dev/null || { cat "$winlog"; fail "the window did not start WebKit"; }
+  sleep 3
+  pkill -TERM -x ipmi-connect || { cat "$winlog"; fail "the window exited early"; }
+  for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
+  kill -0 "$pid" 2>/dev/null && { cat "$winlog"; fail "the window did not quit on SIGTERM"; }
+  pid=
+  grep -q 'Shutting down' "$winlog" || { cat "$winlog"; fail "no clean shutdown"; }
+  rm -f "$winlog"
+  pass "window started WebKit's sandboxed web process and quit on SIGTERM"
+else
+  echo "skip: window check (no xvfb-run)"
+fi

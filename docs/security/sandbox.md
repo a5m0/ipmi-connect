@@ -8,24 +8,33 @@ what the sandbox does **not** protect. The permissions are in
 
 | Permission | Granted | Why |
 | :--- | :--- | :--- |
-| `--share=network` | yes | Reach BMCs; let the browser (outside the sandbox) reach the console on 127.0.0.1 |
+| `--share=network` | yes | Reach BMCs (and, with `--no-browser`, let a browser outside the sandbox reach the console on 127.0.0.1) |
 | Filesystem (`--filesystem=…`) | **no** | Images come from the FileChooser portal or the private media folder |
 | Home, host, SSH keys, Docker/Podman sockets | **no** | |
-| Devices (`--device=…`) | **no** | |
-| X11 / Wayland / GPU | **no** | There is no window: the UI is the user's own browser |
+| `--socket=wayland`, `--socket=fallback-x11`, `--share=ipc` | yes | The console window (WebKitGTK). X11 only where there is no Wayland; `ipc` is X11 shared memory |
+| `--device=dri` | yes | The GPU, for WebKit's compositing. No other devices |
 | Session or system D-Bus (`--socket=session-bus`, `--talk-name`) | **no** | Portals (`org.freedesktop.portal.*`) are reachable by every Flatpak without a permission |
 | `flatpak-spawn --host` (`org.freedesktop.Flatpak`) | **no** | |
 
-`packaging/flatpak/smoke-test.sh` checks the installed app: permissions are network only, a
-file created in `$HOME` is invisible, SSH keys and container sockets are absent, no USB, GPU or
-disk devices, and `flatpak-spawn --host` fails. It ran successfully on x86_64 in development
+`packaging/flatpak/smoke-test.sh` checks the installed app: permissions are exactly network,
+display and GPU, a file created in `$HOME` is invisible, SSH keys and container sockets are
+absent, no USB or disk devices, and `flatpak-spawn --host` fails. Where `xvfb-run` is available
+it also starts the window and checks it quits cleanly.
+
+The display permissions are what the window costs: a process with a Wayland or X11 connection
+can draw windows, and under X11 (not Wayland) it can also read other X11 clients' input and
+screen. WebKit renders the page in its own nested bubblewrap sandbox, and the page is our own
+UI under a strict CSP. Users who prefer the browser can start the app with `--no-browser` and
+open the printed link; the window permissions can then be revoked with
+`flatpak override --user --nosocket=wayland --nosocket=fallback-x11 --nodevice=dri io.github.a5m0.IPMIConnect`. It ran successfully on x86_64 in development
 (see [implementation-plan.md](../implementation-plan.md)); CI runs it on x86_64 and aarch64.
 
 ## Portals used
 
 | Portal | For | Notes |
 | :--- | :--- | :--- |
-| OpenURI | Opening the console link in the default browser | Falls back to `xdg-open` (which in the runtime also uses the portal), then to the printed link |
+| OpenURI | Opening the console link in the default browser (CLI mode only; desktop mode uses the window) | Falls back to `xdg-open` (which in the runtime also uses the portal), then to the printed link |
+| FileChooser (Save) | Saving a screenshot | The chosen file is written through the document portal; nothing else becomes visible |
 | FileChooser + Documents | Choosing a disk image | The chosen file appears in the sandbox under `/run/user/<uid>/doc/…`; only that file. Random access goes through the document portal's FUSE filesystem, so large ISOs are read on demand, not copied into memory |
 
 Unverified on real desktops (see [testing/hardware-validation.md](../testing/hardware-validation.md)):

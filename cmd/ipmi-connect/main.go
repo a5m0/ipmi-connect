@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -200,10 +201,36 @@ func run(opts options, desktop bool) error {
 	if err != nil {
 		return fmt.Errorf("start the local console: %w", err)
 	}
+	if desktop && !opts.NoBrowser {
+		if ui := newNativeUI(); ui != nil {
+			return serveInWindow(ctx, a, ui, listener, shutdown)
+		}
+	}
 	opener := func(url string) { showLink(url, opts.NoBrowser) }
 	go offerNewLinks(ctx, a.server, opts.NoBrowser)
 	if err := a.server.Serve(ctx, listener, opener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("server: %w", err)
 	}
 	return nil
+}
+
+// serveInWindow runs the server in the background and the native window on this goroutine.
+// Closing the window quits; quitting any other way (Quit button, idle timeout, Ctrl+C) closes
+// the window.
+func serveInWindow(ctx context.Context, a *app, ui nativeUI, listener net.Listener, shutdown func()) error {
+	a.server.SaveFile = ui.SaveFile
+	if a.server.PickFile == nil { // the FileChooser portal is preferred where there is one
+		a.server.PickFile = ui.PickFiles
+	}
+	links := make(chan string, 1)
+	served := make(chan error, 1)
+	go func() {
+		served <- a.server.Serve(ctx, listener, func(url string) { links <- url })
+	}()
+	winErr := ui.Run(ctx, links)
+	shutdown()
+	if err := <-served; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("server: %w", err)
+	}
+	return winErr
 }

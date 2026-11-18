@@ -113,11 +113,22 @@ func (s *sessions) Connect(ctx context.Context, req session.Request) (session.St
 	s.phase, s.stop = session.PhaseConnected, cancel
 	s.mu.Unlock()
 	go func() {
-		w, h := 320, 200
+		w, h, interval := 320, 200, 200*time.Millisecond
+		// FAKEAPP_STRESS=1024x768@30 streams a full-screen change at that rate instead, to
+		// measure how fast a browser engine can draw the console.
+		var fps int
+		if _, err := fmt.Sscanf(os.Getenv("FAKEAPP_STRESS"), "%dx%d@%d", &w, &h, &fps); err == nil && fps > 0 {
+			interval = time.Second / time.Duration(fps)
+		} else {
+			w, h = 320, 200
+		}
 		pix := make([]byte, w*h*4)
 		for n := 0; ; n++ {
 			for i := 0; i < len(pix); i += 4 {
 				pix[i], pix[i+1], pix[i+2], pix[i+3] = 200, byte(n), 40, 255
+				if fps > 0 { // a moving gradient, so every tile changes every frame
+					pix[i+2] = byte(i/4%w + n)
+				}
 				if docsMode { // a dark screen, like a host at a text console
 					pix[i], pix[i+1], pix[i+2] = 18, 18, 18
 				}
@@ -126,7 +137,7 @@ func (s *sessions) Connect(ctx context.Context, req session.Request) (session.St
 			select {
 			case <-runCtx.Done():
 				return
-			case <-time.After(200 * time.Millisecond):
+			case <-time.After(interval):
 			}
 		}
 	}()

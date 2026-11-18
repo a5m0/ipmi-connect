@@ -2,11 +2,14 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"encoding/json"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/mhamzahkhan/ipmi-connect/internal/bmc"
@@ -204,5 +207,60 @@ func TestAttachStartsFromABlankPicture(t *testing.T) {
 	srv.Attach(&fakeConsole{}, bmc.SessionState{Host: "other"})
 	if _, _, pix := srv.screenSnapshot(); pix != nil {
 		t.Error("the previous BMC's picture survived Attach")
+	}
+}
+
+func TestScreenshotSaveUsesNativeDialog(t *testing.T) {
+	srv, h, _ := newGuardedServer(t)
+	srv.UpdateScreen(8, 4, solid(8, 4, 7))
+	var gotName string
+	var gotData []byte
+	srv.SaveFile = func(_ context.Context, _, name string, data []byte) (string, error) {
+		gotName, gotData = name, data
+		return "/home/u/" + name, nil
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authed(srv, httptest.NewRequest(http.MethodPost, "/api/screenshot/save", nil)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Path  string `json:"path"`
+		Saved bool   `json:"saved"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil || !resp.Saved || resp.Path != "/home/u/"+gotName {
+		t.Fatalf("response %+v (%v)", resp, err)
+	}
+	if !strings.HasPrefix(gotName, "ipmi-console-") || !strings.HasSuffix(gotName, ".png") {
+		t.Errorf("suggested name %q", gotName)
+	}
+	if img, err := png.Decode(bytes.NewReader(gotData)); err != nil || img.Bounds().Dx() != 8 {
+		t.Errorf("saved data is not the 8-pixel-wide screen: %v", err)
+	}
+}
+
+func TestScreenshotSaveCancelled(t *testing.T) {
+	srv, h, _ := newGuardedServer(t)
+	srv.UpdateScreen(8, 4, solid(8, 4, 7))
+	srv.SaveFile = func(context.Context, string, string, []byte) (string, error) { return "", nil }
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authed(srv, httptest.NewRequest(http.MethodPost, "/api/screenshot/save", nil)))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"saved":false`) {
+		t.Errorf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestScreenshotSaveWithoutDialog(t *testing.T) {
+	srv, h, _ := newGuardedServer(t)
+	srv.UpdateScreen(8, 4, solid(8, 4, 7))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authed(srv, httptest.NewRequest(http.MethodPost, "/api/screenshot/save", nil)))
+	if rec.Code != http.StatusNotImplemented {
+		t.Errorf("status %d, want 501", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, authed(srv, httptest.NewRequest(http.MethodGet, "/api/screenshot/save", nil)))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET status %d, want 405", rec.Code)
 	}
 }

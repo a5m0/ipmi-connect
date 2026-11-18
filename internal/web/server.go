@@ -54,6 +54,7 @@ type Server struct {
 	OnIdle      func()        // called once when idle for IdleTimeout
 	OnShutdown  func()        // called when the UI asks the application to quit
 	PickFile    FilePicker    // native file chooser (portal); nil when unavailable
+	SaveFile    FileSaver     // native Save dialog (desktop window); nil in the browser build
 
 	// After a power action the power state is re-read this often, for this long.
 	powerFollowEvery time.Duration
@@ -143,6 +144,10 @@ func (b *consoleBinding) shut() <-chan struct{} {
 // FilePicker asks the user to choose files with the desktop's native chooser. It returns the
 // chosen paths (empty if the user cancelled).
 type FilePicker func(ctx context.Context, title string, directory bool) ([]string, error)
+
+// FileSaver asks the user where to save data with the desktop's native Save dialog and writes
+// it there. It returns the path written, or "" if the user cancelled.
+type FileSaver func(ctx context.Context, title, suggestedName string, data []byte) (string, error)
 
 // NewServer initializes a new Web UI server.
 func NewServer(port int, state bmc.SessionState) *Server {
@@ -299,6 +304,7 @@ func (s *Server) routes() (http.Handler, error) {
 	s.sessionRoutes(mux)
 	s.mediaRoutes(mux)
 	mux.HandleFunc("GET /api/screenshot.png", s.handleScreenshot)
+	mux.HandleFunc("POST /api/screenshot/save", s.handleScreenshotSave)
 	mux.HandleFunc("GET /ws", s.handleWS)
 	return s.guard(mux), nil
 }

@@ -36,6 +36,7 @@ import { setupView } from '/view.js';
 
   // State
   let ws = null;
+  let saveDialog = false; // the desktop window saves screenshots with a native Save dialog
   let isConnected = false;
   let currentPowerAction = null;
   let currentPowerTitle = '';
@@ -168,6 +169,7 @@ import { setupView } from '/view.js';
       const resp = await apiFetch('/api/status');
       if (!resp.ok) return;
       const data = await resp.json();
+      saveDialog = !!data.save_dialog;
 
       // No BMC: the connection manager; a BMC: the console and its socket.
       const was = phase;
@@ -314,6 +316,39 @@ import { setupView } from '/view.js';
   // Video: the server decodes the BMC stream and sends RGBA.
   //   0x02 full frame: [u16 width][u16 height][RGBA]
   //   0x04 changes:    [u16 count] then per rect [u16 x][u16 y][u16 w][u16 h][RGBA]
+  // Messages only update a copy of the screen in memory (frame) and grow a dirty box; the canvas
+  // is painted once per display frame with a single putImageData of that box. Painting every
+  // 16-pixel strip as it arrived cost about 50 putImageData calls per frame, which starved the
+  // main thread in WebKit.
+  let frame = null;
+  let dirty = null; // {x0, y0, x1, y1}
+  let paintQueued = false;
+
+  function markDirty(x, y, w, h) {
+    if (!dirty) dirty = { x0: x, y0: y, x1: x + w, y1: y + h };
+    else {
+      dirty.x0 = Math.min(dirty.x0, x); dirty.y0 = Math.min(dirty.y0, y);
+      dirty.x1 = Math.max(dirty.x1, x + w); dirty.y1 = Math.max(dirty.y1, y + h);
+    }
+    if (!paintQueued) {
+      paintQueued = true;
+      requestAnimationFrame(paintFrame);
+    }
+  }
+
+  // paintFrame copies the dirty part of the frame to the canvas. It also runs straight away
+  // before a screenshot, so the capture includes updates still waiting for a display frame.
+  function paintFrame() {
+    paintQueued = false;
+    if (!dirty || !frame || frame.width !== canvas.width || frame.height !== canvas.height) {
+      dirty = null;
+      return;
+    }
+    const d = dirty;
+    dirty = null;
+    ctx.putImageData(frame, 0, 0, d.x0, d.y0, d.x1 - d.x0, d.y1 - d.y0);
+  }
+
   function handleBinaryFrame(buf) {
     const view = new DataView(buf);
     const type = view.getUint8(0);
@@ -325,15 +360,26 @@ import { setupView } from '/view.js';
         canvas.height = h;
         statRes.textContent = `Resolution: ${w} x ${h}`;
       }
-      ctx.putImageData(new ImageData(new Uint8ClampedArray(buf, 5, w * h * 4), w, h), 0, 0);
+      if (!frame || frame.width !== w || frame.height !== h) frame = new ImageData(w, h);
+      frame.data.set(new Uint8Array(buf, 5, w * h * 4));
+      markDirty(0, 0, w, h);
     } else if (type === 0x04) {
+      if (!frame) return; // changes before any full frame have nothing to apply to
+      const fw = frame.width, fh = frame.height, data = frame.data;
       let off = 3;
       for (let n = view.getUint16(1); n > 0; n--) {
         const x = view.getUint16(off), y = view.getUint16(off + 2);
         const w = view.getUint16(off + 4), h = view.getUint16(off + 6);
         off += 8;
-        ctx.putImageData(new ImageData(new Uint8ClampedArray(buf, off, w * h * 4), w, h), x, y);
-        off += w * h * 4;
+        if (x + w > fw || y + h > fh) return; // a rect for another resolution: wait for the full frame
+        const row = w * 4;
+        if (x === 0 && w === fw) { // whole rows are contiguous in both buffers
+          data.set(new Uint8Array(buf, off, row * h), y * fw * 4);
+        } else {
+          for (let r = 0; r < h; r++) data.set(new Uint8Array(buf, off + r * row, row), ((y + r) * fw + x) * 4);
+        }
+        off += row * h;
+        markDirty(x, y, w, h);
       }
     }
   }
@@ -495,7 +541,21 @@ import { setupView } from '/view.js';
   // Fullscreen & Screenshot
   function setupFullscreenAndScreenshot() {
 
-    document.getElementById('btnScreenshot').addEventListener('click', () => {
+    document.getElementById('btnScreenshot').addEventListener('click', async () => {
+      if (saveDialog) {
+        // Embedded webviews drop <a download> silently: the server saves its own copy of the
+        // screen through the native Save dialog instead.
+        try {
+          const resp = await apiFetch('/api/screenshot/save', { method: 'POST' });
+          const body = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(body.error || `HTTP ${resp.status}`);
+          if (body.saved) toast(`Screenshot saved to ${body.path}`);
+        } catch (err) {
+          toast(`Could not save the screenshot: ${err.message}`, 'error', 6000);
+        }
+        return;
+      }
+      paintFrame(); // include changes still waiting for the next display frame
       const a = document.createElement('a');
       a.download = `ipmi-console-${Date.now()}.png`;
       a.href = canvas.toDataURL('image/png');

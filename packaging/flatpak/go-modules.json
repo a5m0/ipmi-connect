@@ -8,8 +8,8 @@
   },
   {
     "type": "archive",
-    "url": "https://proxy.golang.org/github.com/coder/websocket/@v/v1.8.12.zip",
-    "sha256": "ad8d323970c04679f4566ee7db98946508c37cdd21a46a875d5257d631a9e990",
+    "url": "https://proxy.golang.org/github.com/coder/websocket/@v/v1.8.14.zip",
+    "sha256": "b729277821461eb21a816c16e29a02029dd6abbb1a43b526c1e0a6b794942de0",
     "dest": "vendor/github.com/coder/websocket",
     "strip-components": 3
   },
@@ -29,9 +29,23 @@
   },
   {
     "type": "archive",
+    "url": "https://proxy.golang.org/github.com/ebitengine/purego/@v/v0.11.1.zip",
+    "sha256": "f314003767757fd3c150029496aedbae2592b2d85b0e76db0f907f77f0170f26",
+    "dest": "vendor/github.com/ebitengine/purego",
+    "strip-components": 3
+  },
+  {
+    "type": "archive",
     "url": "https://proxy.golang.org/github.com/elliotwutingfeng/asciiset/@v/v0.0.0-20260129054604-cfde2086bc57.zip",
     "sha256": "c13ac18e6d481fa04192dc40e741599d1dedac31b1ba06d84c03008f8079c622",
     "dest": "vendor/github.com/elliotwutingfeng/asciiset",
+    "strip-components": 3
+  },
+  {
+    "type": "archive",
+    "url": "https://proxy.golang.org/github.com/go-ole/go-ole/@v/v1.3.0.zip",
+    "sha256": "bbf5b3bfa227a5daa06eb16ecdecccc0b20e08749bf103afb523fd72764e727a",
+    "dest": "vendor/github.com/go-ole/go-ole",
     "strip-components": 3
   },
   {
@@ -85,6 +99,13 @@
   },
   {
     "type": "archive",
+    "url": "https://proxy.golang.org/github.com/wailsapp/wails/v3/@v/v3.1.0.zip",
+    "sha256": "1b2217b78cc2288fe0feb0269857e27ba85599caee0bddd205ec33a51f492707",
+    "dest": "vendor/github.com/wailsapp/wails/v3",
+    "strip-components": 4
+  },
+  {
+    "type": "archive",
     "url": "https://proxy.golang.org/golang.org/x/sys/@v/v0.49.0.zip",
     "sha256": "e73a06591ca0d7016ce3ccb45c36a8ed7128468aecc1a357f94d815c760c6b31",
     "dest": "vendor/golang.org/x/sys",
@@ -99,7 +120,7 @@
   },
   {
     "type": "file",
-    "sha256": "f6d924a5abff12c5bc782305966988f4cfddaddd510935e975a2a5fbb2ab6b7b",
+    "sha256": "fc70acb871fd2ec9376d0cc87a1b64ab2b71e981013f71256934d5011150d7bc",
     "dest": "vendor",
     "path": "modules.txt"
   }
