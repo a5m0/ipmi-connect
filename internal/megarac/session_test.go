@@ -274,3 +274,40 @@ func TestSessionReportsBlankScreen(t *testing.T) {
 		return len(st) > 0 && st[len(st)-1] == statusNoSignal
 	})
 }
+
+func TestSessionTracksKeyboardLEDs(t *testing.T) {
+	bmcSide, conn := newFakeBMC(t)
+	s, _ := startSession(t, conn, &recordingSink{})
+	if got := s.KeyboardLEDs(); got != (KeyboardLEDs{}) {
+		t.Errorf("before any report: %+v", got)
+	}
+	bmcSide.handshake(validationOK)
+	bmcSide.send(bmcSide.msg(typeKeyboardLEDs, 0, []byte{0b011}))
+	want := KeyboardLEDs{Known: true, NumLock: true, CapsLock: true}
+	waitFor(t, "LEDs num+caps", func() bool { return s.KeyboardLEDs() == want })
+	bmcSide.send(bmcSide.msg(typeKeyboardLEDs, 0, []byte{0b100}))
+	want = KeyboardLEDs{Known: true, ScrollLock: true}
+	waitFor(t, "LEDs scroll", func() bool { return s.KeyboardLEDs() == want })
+	// A malformed (empty) report leaves the last state alone.
+	bmcSide.send(bmcSide.msg(typeKeyboardLEDs, 0, nil))
+	bmcSide.send(bmcSide.msg(typeBlankScreen, 0, nil))
+	time.Sleep(20 * time.Millisecond)
+	if got := s.KeyboardLEDs(); got != want {
+		t.Errorf("after empty report: %+v", got)
+	}
+}
+
+func TestKeyboardLEDsString(t *testing.T) {
+	for _, tc := range []struct {
+		l    KeyboardLEDs
+		want string
+	}{
+		{KeyboardLEDs{}, "unknown"},
+		{ledsFromByte(0), "Num off, Caps off, Scroll off"},
+		{ledsFromByte(7), "Num on, Caps on, Scroll on"},
+	} {
+		if got := tc.l.String(); got != tc.want {
+			t.Errorf("%+v: %q, want %q", tc.l, got, tc.want)
+		}
+	}
+}

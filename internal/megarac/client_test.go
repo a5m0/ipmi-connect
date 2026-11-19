@@ -171,3 +171,9 @@ func TestClientRefusesLaunchWithoutTLS(t *testing.T) {
 		t.Errorf("single-port TLS launch: %v", err)
 	}
 }
+
+func TestClientKeyboardLEDsWithoutSession(t *testing.T) {
+	if got := (&Client{}).KeyboardLEDs(); got.Known {
+		t.Errorf("no session: %+v", got)
+	}
+}

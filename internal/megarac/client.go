@@ -214,3 +214,13 @@ func (c *Client) PowerControl(action bmc.PowerAction) error {
 // PowerState implements bmc.PowerReader from the web interface, which works without a KVM
 // session.
 func (c *Client) PowerState() (string, error) { return c.web.PowerStatus() }
+
+// KeyboardLEDs returns the host's keyboard LED state from the current KVM session; Known is
+// false while there is no session or the BMC has not reported it.
+func (c *Client) KeyboardLEDs() KeyboardLEDs {
+	s, err := c.current()
+	if err != nil {
+		return KeyboardLEDs{}
+	}
+	return s.KeyboardLEDs()
+}

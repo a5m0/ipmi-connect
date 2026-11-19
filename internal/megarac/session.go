@@ -54,6 +54,29 @@ var powerCodes = map[bmc.PowerAction]uint16{
 	bmc.PowerOff: 0, bmc.PowerOn: 1, bmc.PowerCycle: 2, bmc.PowerReset: 3, bmc.PowerSoftOff: 5,
 }
 
+// KeyboardLEDs is the host's keyboard LED state; Known is false until the BMC reports it.
+type KeyboardLEDs struct {
+	Known, NumLock, CapsLock, ScrollLock bool
+}
+
+// ledsFromByte decodes a KEYBOARD_LEDS (20) payload byte: bit 0 Num, 1 Caps, 2 Scroll Lock.
+func ledsFromByte(b byte) KeyboardLEDs {
+	return KeyboardLEDs{Known: true, NumLock: b&1 != 0, CapsLock: b&2 != 0, ScrollLock: b&4 != 0}
+}
+
+func (l KeyboardLEDs) String() string {
+	if !l.Known {
+		return "unknown"
+	}
+	onOff := func(on bool) string {
+		if on {
+			return "on"
+		}
+		return "off"
+	}
+	return fmt.Sprintf("Num %s, Caps %s, Scroll %s", onOff(l.NumLock), onOff(l.CapsLock), onOff(l.ScrollLock))
+}
+
 // Sink receives a session's output.
 type Sink interface {
 	UpdateScreen(width, height int, pix []byte)
@@ -78,6 +101,7 @@ type Session struct {
 	power     atomic.Value // string
 	width     atomic.Int32
 	height    atomic.Int32
+	leds      atomic.Value // KeyboardLEDs
 
 	inputMu  sync.Mutex // keeps reports in order with the state they describe
 	keys     keyboardReport
@@ -92,6 +116,7 @@ type Session struct {
 func newSession(conn net.Conn, r *bufio.Reader, cred credentials) *Session {
 	s := &Session{conn: conn, r: r, cred: cred, out: make(chan []byte, sendQueueLen), done: make(chan struct{})}
 	s.power.Store(bmc.PowerStateUnknown)
+	s.leds.Store(KeyboardLEDs{})
 	return s
 }
 
@@ -207,6 +232,14 @@ func (s *Session) handle(m message, sink Sink) error {
 		s.power.Store(state)
 	case typePowerResponse:
 		s.enqueue(header(typePowerStatus, 0, 0))
+	case typeKeyboardLEDs:
+		if len(m.Payload) == 0 {
+			return nil
+		}
+		leds := ledsFromByte(m.Payload[0])
+		if prev := s.leds.Swap(leds); prev != leds {
+			log.Printf("[MegaRAC] Host keyboard LEDs: %s", leds)
+		}
 	case typeBlankScreen:
 		s.setStatus(sink, statusNoSignal)
 	case typeVideoFragment:
@@ -354,6 +387,9 @@ func (s *Session) PowerControl(action bmc.PowerAction) error {
 	log.Printf("[MegaRAC] Power %q sent over the KVM session", action)
 	return s.send(header(typePowerControl, 0, code))
 }
+
+// KeyboardLEDs returns the host's keyboard LED state as last reported by the BMC.
+func (s *Session) KeyboardLEDs() KeyboardLEDs { return s.leds.Load().(KeyboardLEDs) }
 
 // PowerState is the host power state the BMC last reported on this session.
 func (s *Session) PowerState() string {
