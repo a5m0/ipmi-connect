@@ -7,6 +7,7 @@ Reverse-engineering notes for the BMCs that `ipmi-connect` talks to. Examples us
 | [protocols.md](protocols.md) | Wire formats: Avocent APCP/BEEF packets, Dell AppWeb API, ATEN RFB |
 | [dell-c6220.md](dell-c6220.md) | Dell C6220 II deep dive: auth flow, JNLP tokens, video engine, keepalives |
 | [supermicro-x8dtl-6f.md](supermicro-x8dtl-6f.md) | Supermicro X8DTL-6F deep dive: CGI quirks, RFB auth, virtual media, power |
+| [asus-asmb8-ikvm.md](asus-asmb8-ikvm.md) | ASUS ASMB8-iKVM (AMI MegaRAC) deep dive: RPC login, single-port tunnel, IVTP, video, HID, power |
 | [design/desktop.md](design/desktop.md) | Desktop mode, session lifecycle, connection flow, storage |
 | [security/threat-model.md](security/threat-model.md) | Threats, mitigations and remaining risks |
 | [security/sandbox.md](security/sandbox.md) | Flatpak permissions, portals and network limits |
