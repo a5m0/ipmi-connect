@@ -183,6 +183,7 @@ ipmi-connect 192.0.2.20 --type supermicro --allow-insecure-channels --trust-fing
 | `--no-browser` | print the link (valid 10 minutes) instead of opening it |
 | `--idle-timeout <duration>` | log out and quit after this long with no browser (`0` disables) |
 | `--media-dir <folder>` | also allow virtual media images from this folder (repeatable) |
+| `--debug <areas>` | log protocol details for troubleshooting; also `IPMI_CONNECT_DEBUG` (merged, comma lists allowed). `megarac-media` traces each MegaRAC media command and reply status, never the data |
 | `--trust-fingerprint <sha256>` | trust this certificate (repeatable) |
 | `--replace-fingerprint` | replace a pinned certificate that changed (with `--trust-fingerprint`) |
 | `--allow-legacy-tls` | allow TLS 1.0/1.1 and cipher suites without forward secrecy (static RSA, including RSA-GCM), CBC or 3DES for this BMC |

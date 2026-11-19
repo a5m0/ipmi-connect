@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/a5m0/ipmi-connect/internal/atenvm"
+	"github.com/a5m0/ipmi-connect/internal/debuglog"
 	"github.com/a5m0/ipmi-connect/internal/vmedia"
 )
 
@@ -372,6 +373,9 @@ func (p *mediaPool) serve(t *mediaTunnel, r *bufio.Reader) {
 			}
 			rep = t.execute(req)
 		}
+		if debuglog.On(debuglog.MegaRACMedia) {
+			debuglog.Printf(debuglog.MegaRACMedia, "%s", describeMediaRequest(t.target, req, rep))
+		}
 		_ = t.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 		if _, err := t.conn.Write(rep); err != nil {
 			p.died(t, fmt.Errorf("MegaRAC %s tunnel write: %w", t.target, err))
@@ -382,6 +386,28 @@ func (p *mediaPool) serve(t *mediaTunnel, r *bufio.Reader) {
 			return
 		}
 	}
+}
+
+// maxTraceTail is the most request data the trace shows, and only for private opcodes: enough
+// for the one-byte argument of 0xF3, too little to carry anything from a disk.
+const maxTraceTail = 4
+
+// describeMediaRequest is the megarac-media trace line for one request and its reply: the
+// drive, the opcode and CDB, the reply's status and sense and its data length. It never shows
+// SCSI data; private opcodes with 1 to 4 bytes of request data show them as the tail.
+func describeMediaRequest(target vmedia.Target, req, rep []byte) string {
+	cdb := req[scsiCDBAt:min(len(req), scsiCDBAt+scsiCDBLen)]
+	var st [4]byte
+	var n uint32
+	if len(rep) >= scsiDataAt {
+		copy(st[:], rep[scsiStatusAt:])
+		n = binary.LittleEndian.Uint32(rep[scsiDataLenAt:])
+	}
+	line := fmt.Sprintf("%s op=%02x cdb=% x -> st=%02x/%02x/%02x/%02x len=%d", target, cdb[0], cdb, st[0], st[1], st[2], st[3], n)
+	if cdb[0] >= opMediaPrivate && len(req) > scsiDataAt && len(req)-scsiDataAt <= maxTraceTail {
+		line += fmt.Sprintf(" tail=% x", req[scsiDataAt:])
+	}
+	return line
 }
 
 // execute answers one SCSI request from the image in the tunnel: an empty drive has no medium,

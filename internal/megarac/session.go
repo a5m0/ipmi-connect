@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/a5m0/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/debuglog"
 )
 
 // Status texts shown to the user.
@@ -405,7 +406,13 @@ func (s *Session) SetMediaState(on bool) error {
 	if on {
 		status = 1
 	}
-	return s.send(header(typeMediaState, 0, status))
+	err := s.send(header(typeMediaState, 0, status))
+	result := any("ok")
+	if err != nil {
+		result = err
+	}
+	debuglog.Printf(debuglog.MegaRACMedia, "MEDIA_STATE %d: %v", status, result)
+	return err
 }
 
 // KeyboardLEDs returns the host's keyboard LED state as last reported by the BMC.

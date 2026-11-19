@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"github.com/a5m0/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/debuglog"
 	"github.com/a5m0/ipmi-connect/internal/vmedia"
 )
 
@@ -720,5 +723,110 @@ func TestClientMediaClosedWithTheKVM(t *testing.T) {
 	stop()
 	if got := f.kvmEvents(2); strings.Contains(got, "media 1") {
 		t.Errorf("new KVM session messages %q: no drive is connected", got)
+	}
+}
+
+// traceOn switches the megarac-media trace on for the test and captures the log.
+func traceOn(t *testing.T, on bool) *lockedBuffer {
+	t.Helper()
+	debuglog.Reset()
+	if on {
+		debuglog.Enable(debuglog.MegaRACMedia)
+	}
+	buf := &lockedBuffer{}
+	out, flags := log.Writer(), log.Flags()
+	log.SetOutput(buf)
+	log.SetFlags(0)
+	t.Cleanup(func() { debuglog.Reset(); log.SetOutput(out); log.SetFlags(flags) })
+	return buf
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestMediaTraceSCSI(t *testing.T) {
+	buf := traceOn(t, true)
+	h := newMediaHarness(t)
+	img := patternImage(8 * 2048)
+	f := h.mapOK(img, vmedia.MapOptions{Target: vmedia.TargetCD, Size: 8 * 2048})
+	f.scsi([]byte{0x00, 0, 0, 0, 0, 0}, nil)
+	r := f.scsi([]byte{0x28, 0, 0, 0, 0, 2, 0, 0, 3, 0}, nil)
+	if r.status != 0 {
+		t.Fatalf("READ: status %d", r.status)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"[Debug megarac-media] ",
+		"op=28 cdb=28 00 00 00 00 02 00 00 03 00 00 00 -> st=00/00/00/00 len=6144",
+		"cd op=00 cdb=00 00 00 00 00 00 00 00 00 00 00 00 -> st=00/00/00/00 len=0",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("trace lacks %q:\n%s", want, got)
+		}
+	}
+	// Never the data, in any form.
+	for off := 0; off+8 <= len(r.data); off += 512 {
+		run := r.data[off : off+8]
+		if strings.Contains(got, string(run)) || strings.Contains(got, fmt.Sprintf("% x", run)) || strings.Contains(got, fmt.Sprintf("%x", run)) {
+			t.Fatalf("trace carries image data at %d:\n%s", off, got)
+		}
+	}
+}
+
+func TestMediaTraceOff(t *testing.T) {
+	buf := traceOn(t, false)
+	h := newMediaHarness(t)
+	f := h.mapOK(patternImage(8*2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 8 * 2048})
+	f.scsi([]byte{0x28, 0, 0, 0, 0, 2, 0, 0, 3, 0}, nil)
+	if got := buf.String(); strings.Contains(got, "[Debug") {
+		t.Errorf("traced while off:\n%s", got)
+	}
+}
+
+func TestMediaTracePrivateTail(t *testing.T) {
+	buf := traceOn(t, true)
+	h := newMediaHarness(t)
+	f := h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
+	f.scsi([]byte{0xF3}, []byte{0x02})
+	if got := buf.String(); !strings.Contains(got, "op=f3 cdb=f3 00") || !strings.Contains(got, "-> st=01/05/20/00 len=0 tail=02") {
+		t.Errorf("trace:\n%s", got)
+	}
+}
+
+func TestDescribeMediaRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		op   byte
+		data []byte
+		tail string
+	}{
+		{"private, no data", 0xF3, nil, ""},
+		{"private, 4 bytes", 0xF3, []byte{1, 2, 3, 4}, " tail=01 02 03 04"},
+		{"private, 5 bytes", 0xF3, []byte{1, 2, 3, 4, 5}, ""},
+		{"SCSI write data is never shown", 0x2A, []byte{9}, ""},
+	} {
+		req := scsiRequest(1, []byte{tc.op}, tc.data)
+		rep := scsiReply(req, 1, 0x05, 0x20, 0, nil)
+		got := describeMediaRequest(vmedia.TargetCD, req, rep)
+		if !strings.HasSuffix(got, "len=0"+tc.tail) {
+			t.Errorf("%s: %q, want suffix %q", tc.name, got, "len=0"+tc.tail)
+		}
+		if !strings.HasPrefix(got, vmedia.TargetCD.String()+" op=") {
+			t.Errorf("%s: %q does not start with the drive", tc.name, got)
+		}
 	}
 }

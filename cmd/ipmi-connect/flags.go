@@ -34,6 +34,8 @@ type options struct {
 	MediaDirs   []string
 	IdleTimeout time.Duration
 	IdleSet     bool
+
+	Debug []string // --debug areas, as given (each may be a comma list)
 }
 
 const defaultWebPort = 8080
@@ -54,7 +56,9 @@ func printUsage() {
 	p("  --no-browser              Do not open the web browser; print the link\n")
 	p("  --idle-timeout <duration> Disconnect and quit after this long with no browser\n")
 	p("                            (default: 30m in desktop mode, off with a host; 0 disables)\n")
-	p("  --media-dir <folder>      Also allow virtual media images from this folder (repeatable)\n\n")
+	p("  --media-dir <folder>      Also allow virtual media images from this folder (repeatable)\n")
+	p("  --debug <areas>           Log protocol details for troubleshooting (megarac-media);\n")
+	p("                            also $%s\n\n", envDebug)
 	p("Trust (asked interactively when a terminal is available):\n")
 	p("  --trust-fingerprint <SHA256>  Trust the BMC certificate with this SHA-256 fingerprint\n")
 	p("  --replace-fingerprint     Replace a pinned certificate that changed (with --trust-fingerprint)\n")
@@ -135,6 +139,7 @@ func parseArgs(args []string) options {
 		case value(&i, arg, setIdle, "--idle-timeout"):
 		case value(&i, arg, func(v string) { o.TrustFingerprints = append(o.TrustFingerprints, v) }, "--trust-fingerprint"):
 		case value(&i, arg, func(v string) { o.MediaDirs = append(o.MediaDirs, v) }, "--media-dir"):
+		case value(&i, arg, func(v string) { o.Debug = append(o.Debug, v) }, "--debug"):
 		case value(&i, arg, func(string) { o.PortIgnored = true }, "--port", "-port"):
 			o.PortIgnored = true
 		case !strings.HasPrefix(arg, "-"):

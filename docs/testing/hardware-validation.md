@@ -55,8 +55,8 @@ Use a test server whose host OS you can lose, on a management network.
 
 - [ ] KVM reconnect with media attached: attach the writable removable image (its host polls
       TEST UNIT READY), then kill the app's KVM socket (the one with the most bytes received)
-      with `sudo ss -K`. The app reconnects, the drive keeps serving, and the new KVM session
-      gets `MEDIA_STATE` 1. Eject and re-attach an image afterwards. Repeat with the drive
+      with `sudo ss -K`. Run with `--debug megarac-media` to see it: the app reconnects, the
+      drive keeps serving (`op=00` lines go on), and the new KVM session gets `MEDIA_STATE 1`. Eject and re-attach an image afterwards. Repeat with the drive
       ejected. Seen on the test board: the BMC keeps the media tunnel in both cases.
 
 ## Desktop and lifecycle

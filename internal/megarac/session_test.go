@@ -332,3 +332,24 @@ func TestSessionSendsMediaState(t *testing.T) {
 		t.Errorf("media state off: status %d", m.Status)
 	}
 }
+
+func TestSessionTracesMediaState(t *testing.T) {
+	buf := traceOn(t, true)
+	bmcSide, conn := newFakeBMC(t)
+	s, _ := startSession(t, conn, &recordingSink{})
+	bmcSide.handshake(validationOK)
+	if err := s.SetMediaState(true); err != nil {
+		t.Fatal(err)
+	}
+	bmcSide.expect(typeMediaState)
+	if err := s.SetMediaState(false); err != nil {
+		t.Fatal(err)
+	}
+	bmcSide.expect(typeMediaState)
+	got := buf.String()
+	for _, want := range []string{"[Debug megarac-media] MEDIA_STATE 1: ok", "[Debug megarac-media] MEDIA_STATE 0: ok"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("trace lacks %q:\n%s", want, got)
+		}
+	}
+}

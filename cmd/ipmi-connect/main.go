@@ -18,12 +18,14 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/a5m0/ipmi-connect/internal/bmc"
 	"github.com/a5m0/ipmi-connect/internal/config"
+	"github.com/a5m0/ipmi-connect/internal/debuglog"
 	"github.com/a5m0/ipmi-connect/internal/portal"
 	"github.com/a5m0/ipmi-connect/internal/session"
 	"github.com/a5m0/ipmi-connect/internal/trust"
@@ -58,10 +60,29 @@ func main() {
 	if opts.PortIgnored {
 		log.Printf("Ignoring --port: BMC ports are fixed by each vendor's protocol. Use --web-port for the local console.")
 	}
+	enableDebug(os.Getenv(envDebug), opts.Debug)
 	desktop := opts.Desktop || opts.Host == ""
 	if err := run(opts, desktop); err != nil {
 		log.Printf("%v", err)
 		os.Exit(1)
+	}
+}
+
+// envDebug holds debug areas, merged with --debug.
+const envDebug = "IPMI_CONNECT_DEBUG"
+
+// enableDebug switches on the debug areas from the environment and the flags, warns about
+// names it does not know, and logs which areas are on.
+func enableDebug(env string, flags []string) {
+	var unknown []string
+	for _, spec := range append([]string{env}, flags...) {
+		unknown = append(unknown, debuglog.Enable(spec)...)
+	}
+	for _, name := range unknown {
+		fmt.Fprintf(os.Stderr, "Unknown debug area %q (known: %s)\n", name, strings.Join(debuglog.Known(), ", "))
+	}
+	if on := debuglog.Areas(); len(on) > 0 {
+		log.Printf("Debug logging on for: %s", strings.Join(on, ", "))
 	}
 }
 
