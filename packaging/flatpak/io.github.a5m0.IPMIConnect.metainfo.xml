@@ -14,7 +14,7 @@
       (ATEN) and ASUS (AMI MegaRAC) baseboard management controllers. It speaks their KVM and
       virtual media protocols itself and shows the console in its own window: video, keyboard,
       mouse, power control and virtual media from local disk images. Support for AMI MegaRAC is
-      experimental and does not include virtual media yet.
+      experimental.
     </p>
     <p>Security features:</p>
     <ul>

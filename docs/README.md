@@ -25,5 +25,5 @@ Reverse-engineering notes for the BMCs that `ipmi-connect` talks to. Examples us
 | Web server | Mbedthis-Appweb 2.4.2 (HTTPS 443) | lighttpd 1.4.23 (HTTP 80, HTTPS 443) | no `Server` header (HTTP 80, HTTPS 443) |
 | TLS | TLSv1 only, `DHE-RSA-AES256-SHA` | TLSv1 only, `AES256-SHA` | TLS 1.2, RSA key exchange only (`AES256-GCM-SHA384`) |
 | KVM | TCP 7578 (APCP) | TCP 5900 (RFB) | IVTP tunnelled through HTTPS 443 |
-| Virtual media | TCP 7578 (AVMP) | TCP 623 (RMCP/USB) or CIFS/HTTP share | not implemented in ipmi-connect |
+| Virtual media | TCP 7578 (AVMP) | TCP 623 (RMCP/USB) or CIFS/HTTP share | IUSB, one tunnel per drive through HTTPS 443 |
 | Default user | `root` | `root` | not recorded |

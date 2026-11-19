@@ -53,13 +53,16 @@ Requested over HTTPS, the JNLP launches `JViewer` with named arguments **(verifi
 
 ## 2. Single-Port Tunnel
 
-1. Open TLS to port 443 (**verified**: TLS 1.2, `AES256-GCM-SHA384`).
+1. Open TLS to port 443 (**verified**: TLS 1.2, static RSA with AES-GCM; ipmi-connect gets
+   `TLS_RSA_WITH_AES_128_GCM_SHA256`, OpenSSL `AES256-GCM-SHA384`).
 2. Send two ASCII requests, back to back **(verified)**:
    ```
    CONNECT <host>:443 HTTPS/1.1\n cookie <webcookie>\r\n\r\n
    JVIEWER VIDEO cookie <webcookie>\r\n\r\n
    ```
-   The odd spacing (`\n cookie`) is what the viewer sends.
+   The odd spacing (`\n cookie`) is what the viewer sends. Virtual media uses the same request
+   with `CDMEDIA`, `FDMEDIA` or `HDMEDIA` in place of `VIDEO`, one tunnel per drive **(verified for
+   CD and floppy)**.
 3. The BMC answers `HTTP/1.0 200 OK\r\n\r\n` **(verified)**; a reply containing `ERROR` names an
    error code. From then on the socket carries IVTP.
 4. To leave, send `JVIEWER DISCONNECT Cookie <webcookie>\r\n\r\n`.
@@ -164,3 +167,52 @@ the KVM token (status 255, size 41). The test board did not ask for it.
 `POWER_STATUS` (34) with no payload asks for the state; the reply carries it in `status`.
 `POWER_CONTROL_REQUEST` (35) carries the IPMI chassis code in `status`: 0 off, 1 on, 2 cycle,
 3 hard reset, 5 soft off; the result comes back as `POWER_CONTROL_RESPONSE` (36).
+
+### 3.7 Keyboard LEDs (verified)
+
+`KEYBOARD_LEDS` (20) carries one payload byte: bit 0 Num Lock, bit 1 Caps Lock, bit 2 Scroll Lock.
+The BMC sends it straight after validation.
+
+---
+
+## 4. Virtual media (IUSB)
+
+Each drive gets its own tunnel (section 2). After the tunnel reply the socket carries IUSB frames:
+a 32-byte header, then `u32` (little-endian, at offset 12) bytes. The layout below is from the
+viewer's wire behaviour; offsets count from the start of the frame.
+
+| Offset | Size | Field |
+| ---: | ---: | :--- |
+| 0 | 8 | signature `IUSB    ` (the only field the client should check: the BMC leaves 8..10 zero **(verified)**) |
+| 8, 9, 10 | 1 each | major 1, minor 0, header length 32 (as the client sends them) |
+| 11 | 1 | checksum: the 32 header bytes sum to zero |
+| 12 | 4 | length of what follows the header |
+| 17, 18 | 1 each | device type 5, protocol 1 (the client sends these for every drive type) |
+| 19 | 1 | direction: `0x80` from the client |
+| 22 | 1 | client data: the drive type (`0x80` = image) for a hard disk, else 0 |
+| 23 | 1 | drive instance |
+| 24 | 4 | sequence number, echoed in replies |
+| 41 | 12 | opcode / SCSI CDB (big-endian fields, as in SCSI) |
+| 53 | 4 | reply: status (0 good, 1 check condition), sense key, ASC, ASCQ |
+| 57 | 4 | reply: data length (little-endian) |
+| 61 | n | data (READ replies, WRITE requests) |
+
+- **Auth (verified)**: the client sends opcode `0xF2` at 41 with the KVM session token from 63
+  (zero-padded, 160 bytes in all). The BMC answers `0xF1` with a status at 62: 1 connected,
+  5 no privilege, 8 no free session, anything else in use (the other client's IP follows).
+- **SCSI (verified for CD and floppy)**: the BMC forwards the host's commands; the client
+  replies with the request's first 61 bytes echoed (header fields, sequence number and CDB),
+  status and sense at 53..56, data length at 57 and data from 61, at most 128 KiB. The host's
+  first commands were TEST UNIT READY, READ TOC, READ CAPACITY and READ(10).
+- **Private opcodes**: `0xF6` (BMC) stops the drive; `0xF4` (BMC, hard disk only) asks for the
+  drive type, which the client appends as one byte after an empty reply.
+- **Media state**: the client sends IVTP `MEDIA_STATE` (24) on the KVM channel, `status` 1 when
+  its first drive connects and 0 when the last one closes. The BMC does not answer it.
+- There is no goodbye packet and no keepalive: the client closes the socket.
+
+**Busy drives (seen on the test board)**: after a drive's tunnel closes, cleanly or not, the
+BMC refuses that drive type (status 8) for about two minutes. It then stops answering the auth
+at all for a few more minutes; while an auth waits, the web interface stalls too. Sending
+`JVIEWER DISCONNECT` on the media tunnel before closing did not change this. Ejecting and
+mapping again straight away therefore fails; ipmi-connect says to retry later. A removable
+(`HDMEDIA`) drive could not be tested for this reason.
