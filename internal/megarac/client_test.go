@@ -2,15 +2,20 @@ package megarac
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/a5m0/ipmi-connect/internal/bmc"
 )
 
 // oneConnListener hands a single connection to http.Serve.
@@ -50,10 +55,11 @@ type fakeBMCServer struct {
 	tunnels int
 	disc    []string
 	closing chan struct{}
+	media   chan *fakeMediaBMC // media tunnels, after their tunnel request
 }
 
 func newFakeBMCServer(t *testing.T) *fakeBMCServer {
-	f := &fakeBMCServer{t: t, web: &fakeWeb{password: "pw", cookie: "COOKIE123", csrf: "CSRF456", power: 1}, closing: make(chan struct{})}
+	f := &fakeBMCServer{t: t, web: &fakeWeb{password: "pw", cookie: "COOKIE123", csrf: "CSRF456", power: 1}, closing: make(chan struct{}), media: make(chan *fakeMediaBMC, 4)}
 	// httptest provides the certificate; connections are accepted here and split by their first bytes.
 	f.srv = httptest.NewUnstartedServer(f.web)
 	f.srv.StartTLS()
@@ -90,19 +96,29 @@ func (f *fakeBMCServer) serve(c net.Conn) {
 		_ = http.Serve(l, f.web)
 		return
 	}
-	defer c.Close()
-	// Two request blocks, each ending with a blank line.
+	// Two request blocks, each ending with a blank line; the second names the service.
+	service := ""
 	for i := 0; i < 2; i++ {
 		for {
 			line, err := r.ReadString('\n')
 			if err != nil {
+				c.Close()
 				return
 			}
 			if line == "\r\n" {
 				break
 			}
+			if i == 1 {
+				service = strings.Fields(line)[1]
+			}
 		}
 	}
+	if service != serviceVideo {
+		_, _ = c.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
+		f.media <- &fakeMediaBMC{t: f.t, service: service, conn: c, r: r}
+		return
+	}
+	defer c.Close()
 	f.mu.Lock()
 	f.tunnels++
 	f.mu.Unlock()
@@ -157,6 +173,74 @@ func TestClientConnectsThroughTheTunnel(t *testing.T) {
 	}
 	if err := c.SendKeyEvent(true, 4); err == nil {
 		t.Error("want an error for input after logout")
+	}
+}
+
+func TestClientMapsCDThroughATunnel(t *testing.T) {
+	f := newFakeBMCServer(t)
+	ep := testEndpoint(t, f.ln.Addr().String(), f.srv.Certificate())
+	c := NewClient(ep, "admin", "pw")
+	if err := c.Login(); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if _, ok := any(c).(bmc.VirtualMedia); !ok {
+		t.Fatal("Client does not implement bmc.VirtualMedia")
+	}
+	sink := &recordingSink{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() { cancel(); c.Logout() }()
+	c.Start(ctx, sink)
+	waitFor(t, "a frame through the tunnel", func() bool { n, _, _, _ := sink.snapshot(); return n > 0 })
+
+	iso := filepath.Join(t.TempDir(), "test.iso")
+	content := bytes.Repeat([]byte("ipmi-connect"), 4*2048/12+1)[:4*2048]
+	if err := os.WriteFile(iso, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	im, err := c.AddImage(iso, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapped := make(chan error, 1)
+	go func() { mapped <- c.MapImage(im.ID, bmc.TargetCD) }()
+	var m *fakeMediaBMC
+	select {
+	case m = <-f.media:
+	case err := <-mapped:
+		t.Fatalf("MapImage returned without a tunnel: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("no media tunnel")
+	}
+	if m.service != serviceCD {
+		t.Errorf("service %q", m.service)
+	}
+	auth := m.accept(1)
+	if tok := string(bytes.TrimRight(auth[mediaAuthTokenAt:], "\x00")); tok != "KVMTOKEN0123456" {
+		t.Errorf("media token %q", tok)
+	}
+	if err := <-mapped; err != nil {
+		t.Fatalf("MapImage: %v", err)
+	}
+	r := m.scsi([]byte{0x28, 0, 0, 0, 0, 1, 0, 0, 2, 0}, nil)
+	if r.status != 0 || !bytes.Equal(r.data, content[2048:3*2048]) {
+		t.Errorf("READ(10): status %d, %d bytes", r.status, len(r.data))
+	}
+	if st := c.MediaStatus(); len(st.Drives) != 1 || st.Drives[0].Target != bmc.TargetCD {
+		t.Errorf("media status %+v", st.Drives)
+	}
+	if err := c.UnmapDrive(bmc.TargetCD); err != nil {
+		t.Fatal(err)
+	}
+	_ = m.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := m.r.ReadByte(); err == nil {
+		t.Error("media tunnel still open after UnmapDrive")
+	}
+}
+
+func TestClientMediaNeedsKVMSession(t *testing.T) {
+	c := &Client{}
+	if _, err := c.openVMedia(context.Background()); err == nil {
+		t.Error("want an error opening virtual media without a KVM session")
 	}
 }
 

@@ -388,6 +388,16 @@ func (s *Session) PowerControl(action bmc.PowerAction) error {
 	return s.send(header(typePowerControl, 0, code))
 }
 
+// SetMediaState tells the BMC that media redirection started (on) or stopped, as JViewer does
+// when its first drive connects and its last one closes.
+func (s *Session) SetMediaState(on bool) error {
+	var status uint16
+	if on {
+		status = 1
+	}
+	return s.send(header(typeMediaState, 0, status))
+}
+
 // KeyboardLEDs returns the host's keyboard LED state as last reported by the BMC.
 func (s *Session) KeyboardLEDs() KeyboardLEDs { return s.leds.Load().(KeyboardLEDs) }
 

@@ -57,6 +57,7 @@ func connectMegaRAC(ctx context.Context, ep *bmc.Endpoint, user, password string
 			return []bmc.ChannelSecurity{
 				tlsChannel("Web interface (login, power, tickets)", web, ok),
 				tlsChannel("KVM (tunnelled through the web port)", web, ok),
+				tlsChannel("Virtual media (tunnelled through the web port)", web, ok),
 			}
 		},
 	}, nil

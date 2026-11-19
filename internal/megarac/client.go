@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/a5m0/ipmi-connect/internal/bmc"
+	"github.com/a5m0/ipmi-connect/internal/vmedia"
 )
 
 const (
@@ -28,17 +29,78 @@ type Client struct {
 	user string
 	web  *Web
 
-	mu      sync.Mutex
-	session *Session
-	running bool
-	stopped chan struct{} // closed when Run returns
+	mu       sync.Mutex
+	session  *Session
+	tunnelAt int // the web port the current KVM tunnel was opened with
+	running  bool
+	stopped  chan struct{} // closed when Run returns
+
+	// Manager provides virtual media (bmc.VirtualMedia) over IUSB tunnels, one per drive.
+	*vmedia.Manager
 }
 
 // NewClient prepares a client for the BMC at ep; call Login, then Start. Every connection goes
 // through ep.
 func NewClient(ep *bmc.Endpoint, user, password string) *Client {
-	return &Client{ep: ep, user: user, web: NewWeb(ep, user, password), stopped: make(chan struct{})}
+	c := &Client{ep: ep, user: user, web: NewWeb(ep, user, password), stopped: make(chan struct{})}
+	c.Manager = vmedia.NewManager(c.openVMedia)
+	return c
 }
+
+// openVMedia starts virtual media on the current KVM session: its drives are tunnelled through
+// the web port like the KVM and authenticated with the same session token.
+func (c *Client) openVMedia(context.Context) (vmedia.Session, error) {
+	s, err := c.current()
+	if err != nil {
+		return nil, fmt.Errorf("virtual media needs the KVM session: %w", err)
+	}
+	c.mu.Lock()
+	webPort := c.tunnelAt
+	c.mu.Unlock()
+	cred := s.cred
+	dial := func(ctx context.Context, service string) (net.Conn, error) {
+		return c.tunnel(ctx, webPort, cred.webCookie, service)
+	}
+	state := func(on bool) {
+		if s, err := c.current(); err == nil {
+			if err := s.SetMediaState(on); err != nil {
+				log.Printf("[MegaRAC] Media state: %v", err)
+			}
+		}
+	}
+	return newMediaSession(dial, cred.kvmToken, state), nil
+}
+
+// tunnel opens a TLS connection to the web port and asks it to carry service.
+func (c *Client) tunnel(ctx context.Context, webPort int, cookie, service string) (net.Conn, error) {
+	dctx, cancel := context.WithTimeout(ctx, dialTimeout)
+	raw, err := c.ep.DialPort(dctx, c.ep.HTTPSPort)
+	cancel()
+	if err != nil {
+		return nil, fmt.Errorf("tunnel: %w", err)
+	}
+	conn, err := c.ep.TLSClient(ctx, raw, "https")
+	if err != nil {
+		_ = raw.Close()
+		return nil, fmt.Errorf("tunnel TLS: %w", err)
+	}
+	_ = conn.SetDeadline(time.Now().Add(handshakeTimeout))
+	r := bufio.NewReader(conn)
+	if err := openTunnel(conn, r, c.ep.Host, webPort, cookie, service); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return bufferedConn{conn, r}, nil
+}
+
+// bufferedConn reads through the reader that consumed the tunnel reply.
+type bufferedConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (b bufferedConn) Read(p []byte) (int, error) { return b.r.Read(p) }
 
 // Login authenticates to the web interface; call it before Start so bad credentials fail fast.
 func (c *Client) Login() error { return c.web.Login() }
@@ -116,31 +178,18 @@ func (c *Client) serveOnce(ctx context.Context, sink Sink) error {
 		return err
 	}
 	// The tunnel shares the web server's port, so it is the port the user connects to.
-	dctx, cancel := context.WithTimeout(ctx, dialTimeout)
-	raw, err := c.ep.DialPort(dctx, c.ep.HTTPSPort)
-	cancel()
+	conn, err := c.tunnel(ctx, l.WebPort, l.WebCookie, serviceVideo)
 	if err != nil {
-		return fmt.Errorf("KVM tunnel: %w", err)
+		return fmt.Errorf("KVM %w", err)
 	}
-	conn, err := c.ep.TLSClient(ctx, raw, "https")
-	if err != nil {
-		_ = raw.Close()
-		return fmt.Errorf("KVM tunnel TLS: %w", err)
-	}
-	_ = conn.SetDeadline(time.Now().Add(handshakeTimeout))
-	r := bufio.NewReader(conn)
-	if err := openTunnel(conn, r, c.ep.Host, l.WebPort, l.WebCookie); err != nil {
-		_ = conn.Close()
-		return err
-	}
-	_ = conn.SetDeadline(time.Time{})
+	bc := conn.(bufferedConn)
 	clientIP := ""
-	if a, ok := raw.LocalAddr().(*net.TCPAddr); ok {
+	if a, ok := conn.LocalAddr().(*net.TCPAddr); ok {
 		clientIP = a.IP.String()
 	}
-	s := newSession(conn, r, credentials{kvmToken: l.KVMToken, webCookie: l.WebCookie, user: c.user, clientIP: clientIP})
+	s := newSession(bc.Conn, bc.r, credentials{kvmToken: l.KVMToken, webCookie: l.WebCookie, user: c.user, clientIP: clientIP})
 	c.mu.Lock()
-	c.session = s
+	c.session, c.tunnelAt = s, l.WebPort
 	c.mu.Unlock()
 	defer func() {
 		c.mu.Lock()
@@ -153,6 +202,9 @@ func (c *Client) serveOnce(ctx context.Context, sink Sink) error {
 
 // Logout ends the web session once the KVM session has closed. Cancel Start's context first.
 func (c *Client) Logout() {
+	if c.Manager != nil {
+		c.Close() // eject every drive while the session token is still valid
+	}
 	c.mu.Lock()
 	running := c.running
 	c.mu.Unlock()

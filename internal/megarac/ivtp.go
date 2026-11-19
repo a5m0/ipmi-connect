@@ -21,6 +21,7 @@ const (
 	typeKeyboardLEDs      = 20
 	typeWebToken          = 21
 	typeSessionAccepted   = 23
+	typeMediaState        = 24
 	typeVideoFragment     = 25
 	typePowerStatus       = 34
 	typePowerControl      = 35

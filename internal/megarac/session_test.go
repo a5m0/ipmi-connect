@@ -311,3 +311,21 @@ func TestKeyboardLEDsString(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionSendsMediaState(t *testing.T) {
+	bmcSide, conn := newFakeBMC(t)
+	s, _ := startSession(t, conn, &recordingSink{})
+	bmcSide.handshake(validationOK)
+	if err := s.SetMediaState(true); err != nil {
+		t.Fatal(err)
+	}
+	if m := bmcSide.expect(typeMediaState); m.Status != 1 || len(m.Payload) != 0 {
+		t.Errorf("media state on: status %d, payload % x", m.Status, m.Payload)
+	}
+	if err := s.SetMediaState(false); err != nil {
+		t.Fatal(err)
+	}
+	if m := bmcSide.expect(typeMediaState); m.Status != 0 {
+		t.Errorf("media state off: status %d", m.Status)
+	}
+}
