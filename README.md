@@ -1,6 +1,6 @@
 # ipmi-connect
 
-A browser console for old Dell (Avocent) and Supermicro (ATEN) server BMCs, so you never have to fight Java Web Start again. One Go binary: video, keyboard, mouse, power control and virtual media, all in a normal browser tab.
+A browser console for old Dell (Avocent), Supermicro (ATEN) and ASUS (AMI MegaRAC) server BMCs, so you never have to fight Java Web Start again. One Go binary: video, keyboard, mouse, power control and virtual media, all in a normal browser tab.
 
 ![The ipmi-connect console showing a Linux host with a virtual CD attached](docs/images/console.png)
 
@@ -43,22 +43,22 @@ The desktop pictures come from the same test app in the native window
 
 ## Supported hardware
 
-It has been tested on the two boards I own. Other BMCs running the same firmware families may work, but I can't promise anything.
+It has been tested on the three boards I own (the ASUS module is newer to the project and experimental). Other BMCs running the same firmware families may work, but I can't promise anything.
 
-| | Dell PowerEdge C6220 II | Supermicro X8DTL-6F |
-| :--- | :--- | :--- |
-| BMC | ASPEED AST2300, Avocent firmware 2.62.5 | Winbond WPCM450, ATEN firmware 3.13 |
-| KVM protocol | Avocent APCP, two TLS sockets on 7578 | ATEN RFB 3.8 on 5900 |
+| | Dell PowerEdge C6220 II | Supermicro X8DTL-6F | ASUS ASMB8-iKVM (experimental) |
+| :--- | :--- | :--- | :--- |
+| BMC | ASPEED AST2300, Avocent firmware 2.62.5 | Winbond WPCM450, ATEN firmware 3.13 | ASPEED AST2400, AMI MegaRAC SP firmware |
+| KVM protocol | Avocent APCP, two TLS sockets on 7578 | ATEN RFB 3.8 on 5900 | AMI IVTP, tunnelled through the web server's TLS port (443) |
 
-| Feature | Dell | Supermicro |
-| :--- | :--- | :--- |
-| Login / clean logout | Works | Works |
-| Live video | Works (Go ASPEED decoder, verified frame-for-frame against Aspeed's reference) | Works (Go Hermon decoder) |
-| Keyboard | Works (USB HID) | Works (USB HID) |
-| Mouse | Works | Works (absolute position and buttons verified on hardware) |
-| Macros (Ctrl+Alt+Del, F-keys…) | Works | Implemented |
-| Power control | Works | Status verified; commands over the KVM socket or `ipmi.cgi` |
-| Virtual media | Works: ISO on CD/DVD (booted an installer), IMG on removable or floppy (read-write), Create Image, transfer graph, USB reset | Works: ISO on CD, IMG on removable or floppy (read-write), Create Image (blank or from a folder), all verified byte-exact on hardware; one drive at a time, see known issues |
+| Feature | Dell | Supermicro | ASUS (MegaRAC) |
+| :--- | :--- | :--- | :--- |
+| Login / clean logout | Works | Works | Works |
+| Live video | Works (Go ASPEED decoder, verified frame-for-frame against Aspeed's reference) | Works (Go Hermon decoder) | Works (same Go ASPEED decoder) |
+| Keyboard | Works (USB HID) | Works (USB HID) | Works (USB HID, type text verified) |
+| Mouse | Works | Works (absolute position and buttons verified on hardware) | Implemented (absolute), not yet tested on hardware |
+| Macros (Ctrl+Alt+Del, F-keys…) | Works | Implemented | Implemented |
+| Power control | Works | Status verified; commands over the KVM socket or `ipmi.cgi` | Status verified; commands over the KVM tunnel, not yet tested on hardware |
+| Virtual media | Works: ISO on CD/DVD (booted an installer), IMG on removable or floppy (read-write), Create Image, transfer graph, USB reset | Works: ISO on CD, IMG on removable or floppy (read-write), Create Image (blank or from a folder), all verified byte-exact on hardware; one drive at a time, see known issues | Not implemented yet |
 
 **ASUS ASMB8-iKVM (experimental).** This module runs AMI MegaRAC SP on an ASPEED AST2400, with
 the KVM tunnelled through the web server's TLS port (`--type megarac`, or auto detection). Login,
@@ -159,7 +159,7 @@ ipmi-connect 192.0.2.10                       # logs in as root and opens the co
 ipmi-connect 192.0.2.20 -u admin --no-browser  # print the console link instead
 ```
 
-The vendor is detected automatically; force it with `--type dell|supermicro`. Credentials come
+The vendor is detected automatically; force it with `--type dell|supermicro|megarac`. Credentials come
 from flags, then environment variables, then defaults:
 
 | | Flag | Environment | Default |
@@ -185,7 +185,7 @@ ipmi-connect 192.0.2.20 --type supermicro --allow-insecure-channels --trust-fing
 | `--media-dir <folder>` | also allow virtual media images from this folder (repeatable) |
 | `--trust-fingerprint <sha256>` | trust this certificate (repeatable) |
 | `--replace-fingerprint` | replace a pinned certificate that changed (with `--trust-fingerprint`) |
-| `--allow-legacy-tls` | allow TLS 1.0/1.1 and CBC/3DES ciphers for this BMC |
+| `--allow-legacy-tls` | allow TLS 1.0/1.1 and cipher suites without forward secrecy (static RSA, including RSA-GCM), CBC or 3DES for this BMC |
 | `--allow-insecure-channels` | allow unencrypted KVM / virtual media channels for this BMC |
 
 **Changed in this version:** earlier versions accepted any BMC certificate silently. A first,
@@ -370,4 +370,4 @@ test/e2e/              Browser test against a scripted fake BMC session
 
 Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). The ASPEED video decoder in `internal/aspeed/` is ported from Aspeed's reference implementation and stays under the Mozilla Public License 2.0; see [internal/aspeed/LICENSE](internal/aspeed/LICENSE).
 
-ipmi-connect is an independent project, not affiliated with or endorsed by Dell, Vertiv (Avocent), ATEN, Supermicro or ASPEED. Their names are used only to describe compatibility; see [NOTICE](NOTICE) for the trademark details.
+ipmi-connect is an independent project, not affiliated with or endorsed by Dell, Vertiv (Avocent), ATEN, Supermicro, ASUS, AMI (American Megatrends) or ASPEED. Their names are used only to describe compatibility; see [NOTICE](NOTICE) for the trademark details.

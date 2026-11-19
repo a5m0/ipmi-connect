@@ -1,5 +1,5 @@
 // Command ipmi-connect is a browser-based replacement for the Java Web Start KVM consoles
-// shipped with legacy Dell (Avocent) and Supermicro (ATEN) BMCs.
+// shipped with legacy Dell (Avocent), Supermicro (ATEN) and AMI MegaRAC BMCs.
 //
 // Without a host it runs the desktop connection manager: a local console server on a free
 // loopback port that the user's browser opens, where they choose a BMC. With a host it connects

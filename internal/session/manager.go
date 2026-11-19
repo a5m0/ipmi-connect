@@ -59,7 +59,7 @@ type Request struct {
 	Address  string `json:"address"`
 	User     string `json:"user"`
 	Password string `json:"password"`
-	Vendor   string `json:"vendor"` // auto, dell or supermicro
+	Vendor   string `json:"vendor"` // auto, dell, supermicro or megarac
 
 	// TrustFingerprints are certificates the user has explicitly confirmed. Only fingerprints
 	// that the probe actually observed for this device are pinned.

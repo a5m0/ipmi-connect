@@ -16,14 +16,14 @@ Reverse-engineering notes for the BMCs that `ipmi-connect` talks to. Examples us
 
 ## Tested hardware & firmware
 
-| | Dell PowerEdge C6220 II | Supermicro X8DTL-6F |
-| :--- | :--- | :--- |
-| BMC SoC | ASPEED AST2300 (ASIC type 7) | Winbond/Nuvoton WPCM450 (ARM926EJ-S) |
-| Firmware | `2.62.5` (May 21 2015) | `0313` / `3.13` (Jan 02 2014), tag `BL_SUPERMICRO_X7SB3_2014-01-02_B` |
-| Firmware vendor | Avocent MergePoint Embedded | ATEN |
-| Host | C6220 II, BIOS 2.10.0 | X8DTL-6F, Intel 5500 / Dual LGA1366 |
-| Web server | Mbedthis-Appweb 2.4.2 (HTTPS 443) | lighttpd 1.4.23 (HTTP 80, HTTPS 443) |
-| TLS | TLSv1 only, `DHE-RSA-AES256-SHA` | TLSv1 only, `AES256-SHA` |
-| KVM | TCP 7578 (APCP) | TCP 5900 (RFB) |
-| Virtual media | TCP 7578 (AVMP) | TCP 623 (RMCP/USB) or CIFS/HTTP share |
-| Default user | `root` | `root` |
+| | Dell PowerEdge C6220 II | Supermicro X8DTL-6F | ASUS ASMB8-iKVM |
+| :--- | :--- | :--- | :--- |
+| BMC SoC | ASPEED AST2300 (ASIC type 7) | Winbond/Nuvoton WPCM450 (ARM926EJ-S) | ASPEED AST2400 |
+| Firmware | `2.62.5` (May 21 2015) | `0313` / `3.13` (Jan 02 2014), tag `BL_SUPERMICRO_X7SB3_2014-01-02_B` | not recorded |
+| Firmware vendor | Avocent MergePoint Embedded | ATEN | AMI MegaRAC SP (classic `/rpc/*.asp` web interface) |
+| Host | C6220 II, BIOS 2.10.0 | X8DTL-6F, Intel 5500 / Dual LGA1366 | ASUS server board with the ASMB8-iKVM module |
+| Web server | Mbedthis-Appweb 2.4.2 (HTTPS 443) | lighttpd 1.4.23 (HTTP 80, HTTPS 443) | no `Server` header (HTTP 80, HTTPS 443) |
+| TLS | TLSv1 only, `DHE-RSA-AES256-SHA` | TLSv1 only, `AES256-SHA` | TLS 1.2, RSA key exchange only (`AES256-GCM-SHA384`) |
+| KVM | TCP 7578 (APCP) | TCP 5900 (RFB) | IVTP tunnelled through HTTPS 443 |
+| Virtual media | TCP 7578 (AVMP) | TCP 623 (RMCP/USB) or CIFS/HTTP share | not implemented in ipmi-connect |
+| Default user | `root` | `root` | not recorded |

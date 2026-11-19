@@ -16,9 +16,11 @@ source code was accessed. No vendor code, binaries, firmware or documentation ar
 Trademarks
 ----------
 ipmi-connect is an independent project. It is not affiliated with, endorsed by, sponsored by or
-supported by Dell Inc., Vertiv (Avocent), ATEN International, Super Micro Computer, Inc. or
-ASPEED Technology Inc. Dell, PowerEdge and iDRAC are trademarks of Dell Inc. or its
-subsidiaries. Avocent and MergePoint are trademarks of Vertiv or its affiliates. ATEN is a
-trademark of ATEN International. Supermicro is a trademark of Super Micro Computer, Inc. ASPEED
-is a trademark of ASPEED Technology Inc. Java is a registered trademark of Oracle and/or its
+supported by Dell Inc., Vertiv (Avocent), ATEN International, Super Micro Computer, Inc.,
+ASUSTeK Computer Inc., American Megatrends International, LLC (AMI) or ASPEED Technology Inc.
+Dell, PowerEdge and iDRAC are trademarks of Dell Inc. or its subsidiaries. Avocent and
+MergePoint are trademarks of Vertiv or its affiliates. ATEN is a trademark of ATEN
+International. Supermicro is a trademark of Super Micro Computer, Inc. ASUS is a trademark of
+ASUSTeK Computer Inc. AMI and MegaRAC are trademarks of American Megatrends International, LLC.
+ASPEED is a trademark of ASPEED Technology Inc. Java is a registered trademark of Oracle and/or its
 affiliates. These names are used only to describe compatibility.

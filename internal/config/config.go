@@ -84,7 +84,7 @@ type Profile struct {
 	Name    string `json:"name"`
 	Address string `json:"address"`
 	User    string `json:"user"`
-	Vendor  string `json:"vendor"` // auto, dell or supermicro
+	Vendor  string `json:"vendor"` // auto, dell, supermicro or megarac
 	// Explicit legacy preferences: pre-select the consent boxes for this device. Consent itself
 	// is recorded in the trust store when the user connects.
 	LegacyTLS        bool `json:"legacy_tls,omitempty"`

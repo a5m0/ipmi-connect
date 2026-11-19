@@ -13,7 +13,7 @@ type options struct {
 	Host        string
 	User        string // empty means IPMI_CONNECT_USER, else root
 	Password    string // empty means IPMI_CONNECT_PASSWORD, else prompt
-	Type        string // auto, dell or supermicro
+	Type        string // auto, dell, supermicro or megarac
 	WebPort     int
 	WebPortSet  bool // --web-port was given (desktop mode otherwise lets the OS choose)
 	NoBrowser   bool
