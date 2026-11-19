@@ -19,9 +19,9 @@ import (
 // mediaAuthTimeout bounds the tunnel's auth exchange.
 const mediaAuthTimeout = 10 * time.Second
 
-// mediaBusyHint explains the BMC's habit, seen on the ASMB8, of keeping a drive's slot for a few
-// minutes after its tunnel closes.
-const mediaBusyHint = "the BMC keeps a drive busy for a few minutes after its connection drops; try again shortly, or reconnect"
+// mediaBusyHint explains the ASMB8's one media slot, which it keeps for about two minutes after
+// the tunnel holding it closes.
+const mediaBusyHint = "the BMC serves one virtual drive at a time and keeps it for about two minutes after a drive closes; try again in two minutes"
 
 var errMediaUSBReset = errors.New("USB reset is not supported on MegaRAC; eject and map the image again")
 
@@ -34,7 +34,8 @@ var mediaServices = map[vmedia.Target]string{
 	vmedia.TargetCD: serviceCD, vmedia.TargetFloppy: serviceFloppy, vmedia.TargetRemovable: serviceHardDisk,
 }
 
-// mediaPool holds the client's IUSB tunnels, at most one per drive type (CD, floppy, hard disk).
+// mediaPool holds the client's IUSB tunnel: one at a time, since that is all the ASMB8 serves,
+// for whichever drive type (CD, floppy, hard disk) was last attached.
 // A tunnel is dialled when its drive type is first mapped and kept until the pool closes or the
 // tunnel dies: the BMC keeps a drive type busy for minutes after its tunnel closes, so an eject
 // only parks the tunnel, which then reports an empty drive, and the next image reuses it.
@@ -42,12 +43,20 @@ type mediaPool struct {
 	dial  mediaDialer
 	state func(on bool) // tells the KVM session media redirection started or stopped; may be nil
 
-	mu      sync.Mutex
-	tunnels map[vmedia.Target]*mediaTunnel
-	dialing map[vmedia.Target]bool
-	stateOn bool
-	closed  bool
+	now func() time.Time
+
+	mu        sync.Mutex
+	tunnels   map[vmedia.Target]*mediaTunnel
+	dialing   map[vmedia.Target]bool
+	stateOn   bool
+	closed    bool
+	lastClose time.Time // when a tunnel last closed or an auth failed
 }
+
+// mediaSettle is how long the ASMB8 keeps its one media slot after the tunnel holding it closes
+// (seen: refused at up to a minute, accepted from 1m54s). An auth sent sooner goes unanswered
+// and holds the slot again, so the pool waits this long before dialling.
+const mediaSettle = 2 * time.Minute
 
 // mediaTunnel is one drive type's tunnel and the image currently in it, if any.
 type mediaTunnel struct {
@@ -58,6 +67,7 @@ type mediaTunnel struct {
 	mu      sync.Mutex // held while a request runs, so an eject waits for it
 	slot    *mediaSlot // nil while the drive is empty
 	changed bool       // report the medium change to the next command
+	retired bool       // closed on purpose to make room for another drive type
 }
 
 // mediaSlot is an image attached to a tunnel through a view.
@@ -69,7 +79,7 @@ type mediaSlot struct {
 }
 
 func newMediaPool(dial mediaDialer, state func(on bool)) *mediaPool {
-	return &mediaPool{dial: dial, state: state, tunnels: map[vmedia.Target]*mediaTunnel{}, dialing: map[vmedia.Target]bool{}}
+	return &mediaPool{dial: dial, state: state, now: time.Now, tunnels: map[vmedia.Target]*mediaTunnel{}, dialing: map[vmedia.Target]bool{}}
 }
 
 // view returns a new virtual media session on the pool's tunnels.
@@ -102,7 +112,48 @@ func (p *mediaPool) attach(ctx context.Context, target vmedia.Target, slot *medi
 		t.slot, t.changed = slot, true
 		return t, nil
 	}
+	// The ASMB8 serves one media tunnel at a time: it leaves a second drive type's auth
+	// unanswered, and the failed attempt keeps that type busy for minutes. So another type's
+	// image must be ejected first, and its parked tunnel is closed to make room.
+	if len(p.dialing) > 0 {
+		p.mu.Unlock()
+		return nil, errors.New("another drive is being attached; try again when it is done")
+	}
+	var parked []*mediaTunnel
+	for other, t := range p.tunnels {
+		t.mu.Lock()
+		inUse := t.slot != nil
+		t.mu.Unlock()
+		if inUse {
+			p.mu.Unlock()
+			return nil, fmt.Errorf("the BMC serves one virtual drive at a time; eject the %s drive first", other)
+		}
+		parked = append(parked, t)
+	}
+	for _, t := range parked {
+		delete(p.tunnels, t.target)
+	}
 	p.dialing[target] = true
+	p.mu.Unlock()
+	for _, t := range parked {
+		t.mu.Lock()
+		t.retired = true
+		t.mu.Unlock()
+		_ = t.conn.Close()
+		<-t.closed
+		log.Printf("[MegaRAC] Empty %s drive closed to make room for the %s drive", t.target, target)
+	}
+
+	p.mu.Lock()
+	if wait := mediaSettle - p.now().Sub(p.lastClose); !p.lastClose.IsZero() && wait > 0 {
+		delete(p.dialing, target)
+		off := p.stateOffLocked()
+		p.mu.Unlock()
+		if off && p.state != nil {
+			p.state(false)
+		}
+		return nil, fmt.Errorf("the BMC frees its virtual drive about two minutes after a drive closes; try again in %v", wait.Round(time.Second))
+	}
 	p.mu.Unlock()
 
 	t, r, err := p.open(ctx, target, service)
@@ -113,7 +164,14 @@ func (p *mediaPool) attach(ctx context.Context, target vmedia.Target, slot *medi
 		_ = t.conn.Close()
 	}
 	if err != nil {
+		if errors.As(err, new(mediaAuthError)) {
+			p.lastClose = p.now()
+		}
+		off := p.stateOffLocked()
 		p.mu.Unlock()
+		if off && p.state != nil {
+			p.state(false)
+		}
 		return nil, err
 	}
 	t.slot = slot
@@ -126,6 +184,22 @@ func (p *mediaPool) attach(ctx context.Context, target vmedia.Target, slot *medi
 	}
 	go p.serve(t, r)
 	return t, nil
+}
+
+// mediaAuthError is an auth the BMC did not accept: that attempt holds its media slot.
+type mediaAuthError struct{ err error }
+
+func (e mediaAuthError) Error() string { return e.err.Error() }
+func (e mediaAuthError) Unwrap() error { return e.err }
+
+// stateOffLocked notes that media redirection stopped if no tunnel is left, and reports
+// whether to send that.
+func (p *mediaPool) stateOffLocked() bool {
+	if len(p.tunnels) > 0 || !p.stateOn {
+		return false
+	}
+	p.stateOn = false
+	return true
 }
 
 // open dials and authenticates a tunnel for target.
@@ -141,7 +215,7 @@ func (p *mediaPool) open(ctx context.Context, target vmedia.Target, service stri
 	r := bufio.NewReaderSize(conn, 64<<10)
 	if err := authenticate(ctx, conn, r, token, clientData); err != nil {
 		_ = conn.Close()
-		return nil, nil, fmt.Errorf("MegaRAC %s drive: %w", target, err)
+		return nil, nil, fmt.Errorf("MegaRAC %s drive: %w", target, mediaAuthError{err})
 	}
 	log.Printf("[MegaRAC] %s tunnel opened", target)
 	return &mediaTunnel{target: target, conn: conn, closed: make(chan struct{})}, r, nil
@@ -160,6 +234,7 @@ func (p *mediaPool) eject(t *mediaTunnel, slot *mediaSlot) {
 func (p *mediaPool) died(t *mediaTunnel, err error) {
 	p.mu.Lock()
 	closing := p.closed
+	p.lastClose = p.now()
 	last := false
 	if p.tunnels[t.target] == t {
 		delete(p.tunnels, t.target)
@@ -172,6 +247,9 @@ func (p *mediaPool) died(t *mediaTunnel, err error) {
 	t.mu.Lock()
 	slot := t.slot
 	t.slot = nil
+	if t.retired {
+		err = nil
+	}
 	t.mu.Unlock()
 	if closing {
 		err = nil

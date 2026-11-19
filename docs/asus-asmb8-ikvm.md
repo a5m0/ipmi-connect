@@ -62,7 +62,7 @@ Requested over HTTPS, the JNLP launches `JViewer` with named arguments **(verifi
    ```
    The odd spacing (`\n cookie`) is what the viewer sends. Virtual media uses the same request
    with `CDMEDIA`, `FDMEDIA` or `HDMEDIA` in place of `VIDEO`, one tunnel per drive **(verified for
-   CD and floppy)**.
+   CD, floppy and hard disk)**.
 3. The BMC answers `HTTP/1.0 200 OK\r\n\r\n` **(verified)**; a reply containing `ERROR` names an
    error code. From then on the socket carries IVTP.
 4. To leave, the viewer sends IVTP `STOP_SESSION` (8) with size and status 0; the BMC closes the
@@ -202,7 +202,7 @@ viewer's wire behaviour; offsets count from the start of the frame.
 - **Auth (verified)**: the client sends opcode `0xF2` at 41 with the KVM session token from 63
   (zero-padded, 160 bytes in all). The BMC answers `0xF1` with a status at 62: 1 connected,
   5 no privilege, 8 no free session, anything else in use (the other client's IP follows).
-- **SCSI (verified for CD and floppy)**: the BMC forwards the host's commands; the client
+- **SCSI (verified for CD, floppy and hard disk)**: the BMC forwards the host's commands; the client
   replies with the request's first 61 bytes echoed (header fields, sequence number and CDB),
   status and sense at 53..56, data length at 57 and data from 61, at most 128 KiB. The host's
   first commands were TEST UNIT READY, READ TOC, READ CAPACITY and READ(10).
@@ -214,10 +214,13 @@ viewer's wire behaviour; offsets count from the start of the frame.
   its first drive connects and 0 when the last one closes. The BMC does not answer it.
 - There is no goodbye packet and no client keepalive: the client closes the socket.
 
-**Busy drives (seen on the test board)**: after a drive's tunnel closes, cleanly or not, the
-BMC refuses that drive type (status 8) for about two minutes. It then stops answering the auth
-at all for a few more minutes; while an auth waits, the web interface stalls too. Sending
-`JVIEWER DISCONNECT` on the media tunnel before closing did not change this.
+**One drive at a time (seen on the test board)**: the BMC serves one media tunnel at a time.
+While a tunnel is open, the auth on a second drive type goes unanswered. After the tunnel holding
+the slot closes, cleanly or not, the BMC frees it about two minutes later (attaches failed at 0 s,
+8 s and one minute, and worked at 1m54s, 2m04s and later). Until then it refuses (status 8) or
+leaves the auth unanswered, and an attempt in that window holds the slot again. While an auth
+waits, the web interface stalls too. Sending `JVIEWER DISCONNECT` on the media tunnel before
+closing did not change this.
 
 **JViewer does the same (verified)**. A capture of the vendor viewer on the same board:
 
@@ -226,15 +229,20 @@ at all for a few more minutes; while an auth waits, the web interface stalls too
   minutes. The viewer has no timeout: its dialog stayed frozen until the socket was killed.
 - Exiting with a drive connected closes the media socket, sends `MEDIA_STATE` 0, then
   `STOP_SESSION`, in that order.
-- After that exit and a new web login and KVM session, the CD connected at once, under three
-  minutes after the stalled tunnel closed. In this one run the busy state ended with the KVM
-  session rather than after a fixed time.
+- After that exit and a new web login and KVM session, the CD connected at once, about three
+  minutes after the stalled tunnel closed.
 - The viewer answers the second TEST UNIT READY after connecting with `06/28/00`.
 
-ipmi-connect therefore never closes a tunnel on eject. Each drive type's tunnel is opened on its
+ipmi-connect therefore never closes a tunnel on eject. A drive type's tunnel is opened on its
 first attach and kept until logout. While no image is in it, every SCSI command gets CHECK
 CONDITION `02/3A/00` (medium not present); when a new image goes in, the first command other
-than INQUIRY gets `06/28/00` (medium may have changed), after which the drive answers normally.
-At logout it leaves as the viewer does: media first, then `STOP_SESSION`. Eject and re-attach
-are instant; a drive whose tunnel drops mid-session stays busy until the busy period ends or the
-KVM session is replaced.
+than INQUIRY gets `06/28/00` (medium may have changed), after which the host reads the new image
+**(verified with the removable drive, whose host polls TEST UNIT READY)**. Swapping images on
+the same drive type is instant. Switching to another type needs an eject first; the parked
+tunnel is then closed, and no new tunnel is dialled until two minutes after the last one closed,
+so the slot is never held again by an early attempt. At logout ipmi-connect leaves as the viewer
+does: media first, then `STOP_SESSION`.
+
+**Writes and the removable drive (verified)**: the host mounted a FAT floppy image and a 16 MB
+FAT removable (`HDMEDIA`) image, wrote a file to each with WRITE(10), and the file was in the
+image afterwards. The BMC never sent `0xF4` during the removable test.

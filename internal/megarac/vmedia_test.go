@@ -127,6 +127,24 @@ type mediaHarness struct {
 	tunnels chan *fakeMediaBMC
 	states  chan bool
 	dials   atomic.Int32
+	clockMu sync.Mutex
+	clock   time.Time // the pool's clock; advance moves it on
+}
+
+func (h *mediaHarness) now() time.Time {
+	h.clockMu.Lock()
+	defer h.clockMu.Unlock()
+	if h.clock.IsZero() {
+		h.clock = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+	return h.clock
+}
+
+func (h *mediaHarness) advance(d time.Duration) {
+	h.now()
+	h.clockMu.Lock()
+	h.clock = h.clock.Add(d)
+	h.clockMu.Unlock()
 }
 
 func newMediaHarness(t *testing.T) *mediaHarness {
@@ -139,6 +157,7 @@ func newMediaHarness(t *testing.T) *mediaHarness {
 		return client, "KVMTOKEN0123456", nil
 	}
 	h.pool = newMediaPool(dial, func(on bool) { h.states <- on })
+	h.pool.now = h.now
 	h.sess = h.pool.view()
 	t.Cleanup(func() { _ = h.sess.Close(); h.pool.Close() })
 	return h
@@ -262,7 +281,7 @@ func TestMediaServicesAndAuth(t *testing.T) {
 }
 
 func TestMediaAuthRefused(t *testing.T) {
-	for status, want := range map[byte]string{5: "privilege", 8: "a few minutes", 3: "198.51.100.7"} {
+	for status, want := range map[byte]string{5: "privilege", 8: "two minutes", 3: "198.51.100.7"} {
 		h := newMediaHarness(t)
 		f, res := h.mapAsync(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
 		f.accept(status)
@@ -285,8 +304,8 @@ func TestMediaAuthUnanswered(t *testing.T) {
 		f.read() // the auth packet, never answered
 	}()
 	_, err := h.sess.Map(ctx, patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
-	if err == nil || !strings.Contains(err.Error(), "a few minutes") {
-		t.Errorf("unanswered auth: %v, want a hint to retry in a few minutes", err)
+	if err == nil || !strings.Contains(err.Error(), "two minutes") {
+		t.Errorf("unanswered auth: %v, want a hint to retry in two minutes", err)
 	}
 }
 
@@ -380,11 +399,10 @@ func TestMediaUnmapAndClose(t *testing.T) {
 	h := newMediaHarness(t)
 	h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
 	h.state(true)
-	h.mapOK(patternImage(64*512), vmedia.MapOptions{Target: vmedia.TargetRemovable, Size: 64 * 512})
 	if _, err := h.sess.Map(context.Background(), patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048}); err == nil {
 		t.Error("a second CD was mapped")
 	}
-	if drives := h.sess.Drives(); len(drives) != 2 {
+	if drives := h.sess.Drives(); len(drives) != 1 {
 		t.Fatalf("drives %+v", drives)
 	}
 	cdDisk := h.diskOf(vmedia.TargetCD)
@@ -394,7 +412,7 @@ func TestMediaUnmapAndClose(t *testing.T) {
 	if err := h.sess.Unmap(cdDisk); err == nil {
 		t.Error("a second Unmap of the same disk succeeded")
 	}
-	if d := h.sess.Drives(); len(d) != 1 || d[0].Target != vmedia.TargetRemovable {
+	if d := h.sess.Drives(); len(d) != 0 {
 		t.Errorf("drives after the CD eject %+v", d)
 	}
 	if err := h.sess.Close(); err != nil {
@@ -507,6 +525,67 @@ func TestMediaPrivateOpcodes(t *testing.T) {
 	sense(t, "TEST UNIT READY after 0xF3", f.scsi([]byte{0x00, 0, 0, 0, 0, 0}, nil), 1, 0x06, 0x28, 0)
 }
 
+// The ASMB8 serves one media tunnel at a time: a second drive type's auth goes unanswered
+// while another tunnel is open, and the failed attempt leaves that type busy for minutes.
+func TestMediaOneDriveAtATime(t *testing.T) {
+	h := newMediaHarness(t)
+	h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
+	h.state(true)
+	_, err := h.sess.Map(context.Background(), patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetFloppy, Size: 2048})
+	if err == nil || !strings.Contains(err.Error(), "one virtual drive at a time") || !strings.Contains(err.Error(), "cd") {
+		t.Errorf("second drive type: %v, want a one-at-a-time error naming the cd drive", err)
+	}
+	if n := h.dials.Load(); n != 1 {
+		t.Errorf("%d dials, want 1: the second drive must be refused before dialling", n)
+	}
+}
+
+func TestMediaOtherTypeReplacesParkedTunnel(t *testing.T) {
+	h := newMediaHarness(t)
+	cd := h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
+	h.state(true)
+	if err := h.sess.Unmap(h.diskOf(vmedia.TargetCD)); err != nil {
+		t.Fatal(err)
+	}
+	// The parked CD is closed to free the BMC's one slot, which it frees about two minutes
+	// later: dialling sooner would go unanswered and keep it busy longer.
+	_, err := h.sess.Map(context.Background(), patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetFloppy, Size: 2048})
+	if err == nil || !strings.Contains(err.Error(), "try again in 2m0s") {
+		t.Errorf("floppy straight after the CD: %v, want a try-again-in-2m0s error", err)
+	}
+	_ = cd.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := cd.r.ReadByte(); err == nil {
+		t.Error("the parked CD tunnel is still open after asking for the floppy")
+	}
+	if n := h.dials.Load(); n != 1 {
+		t.Errorf("%d dials, want 1", n)
+	}
+	h.state(false)
+	h.advance(90 * time.Second)
+	if _, err := h.sess.Map(context.Background(), patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetFloppy, Size: 2048}); err == nil || !strings.Contains(err.Error(), "try again in 30s") {
+		t.Errorf("floppy 90s later: %v, want try again in 30s", err)
+	}
+	h.advance(30 * time.Second)
+	fd := h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetFloppy, Size: 2048})
+	h.state(true)
+	sense(t, "floppy TEST UNIT READY", fd.scsi([]byte{0x00, 0, 0, 0, 0, 0}, nil), 0, 0, 0, 0)
+}
+
+func TestMediaFailedAuthStartsTheWait(t *testing.T) {
+	h := newMediaHarness(t)
+	f, res := h.mapAsync(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
+	f.accept(8)
+	if err := <-res; err == nil {
+		t.Fatal("refused auth mapped")
+	}
+	if _, err := h.sess.Map(context.Background(), patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048}); err == nil || !strings.Contains(err.Error(), "try again in") {
+		t.Errorf("retry straight after a refusal: %v, want a try-again error", err)
+	}
+	if n := h.dials.Load(); n != 1 {
+		t.Errorf("%d dials, want 1", n)
+	}
+}
+
 func TestMediaParkedTunnelLossRedials(t *testing.T) {
 	h := newMediaHarness(t)
 	f := h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
@@ -521,6 +600,7 @@ func TestMediaParkedTunnelLossRedials(t *testing.T) {
 		t.Fatal("losing a parked tunnel ended the view")
 	default:
 	}
+	h.advance(mediaSettle)
 	g := h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
 	h.state(true)
 	sense(t, "TEST UNIT READY on the new tunnel", g.scsi([]byte{0x00, 0, 0, 0, 0, 0}, nil), 0, 0, 0, 0)
