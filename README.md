@@ -62,9 +62,9 @@ It has been tested on the two boards I own. Other BMCs running the same firmware
 
 **ASUS ASMB8-iKVM (experimental).** This module runs AMI MegaRAC SP on an ASPEED AST2400, with
 the KVM tunnelled through the web server's TLS port (`--type megarac`, or auto detection). Login,
-power status and the KVM session with live video are verified on one board; keyboard, mouse and
-power commands are implemented but not yet tested on hardware, and virtual media is not
-implemented yet. See [docs/asus-asmb8-ikvm.md](docs/asus-asmb8-ikvm.md).
+power status, live video, keyboard and type text are verified on one board; mouse and power
+commands are implemented but not yet tested on hardware, and virtual media is not implemented
+yet. See [docs/asus-asmb8-ikvm.md](docs/asus-asmb8-ikvm.md).
 
 The console also has a **type text** panel (paste or write text, and it is typed on the host as
 keystrokes, optionally followed by Enter; Ctrl/Cmd+Shift+V on the console types the clipboard

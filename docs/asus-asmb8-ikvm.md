@@ -152,7 +152,7 @@ enabled the data is RC4-encrypted under the fixed key `fedcba9876543210` (not se
 the 32 header bytes sum to zero (mod 256).
 
 - Keyboard: device `0x30`, protocol `0x10`, data length 8, the standard boot report
-  (modifiers, 0, six usages); IVTP size 41.
+  (modifiers, 0, six usages); IVTP size 41 **(verified: typing, including type text)**.
 - Absolute mouse: device `0x31`, protocol `0x20`, data length 6: buttons, `u16` x and y scaled
   to 0-32767, wheel; IVTP size 39.
 
