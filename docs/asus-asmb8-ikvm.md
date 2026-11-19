@@ -244,6 +244,14 @@ tunnel is then closed, and no new tunnel is dialled until two minutes after the 
 so the slot is never held again by an early attempt. At logout ipmi-connect leaves as the viewer
 does: media first, then `STOP_SESSION`.
 
+**KVM reconnect with a drive connected (verified)**: when the KVM socket dies (killed on the client
+side) and ipmi-connect reconnects with a new launch (new KVM token and web cookie), the BMC
+leaves the media tunnel alone. The host kept polling TEST UNIT READY through the reconnect and for
+a minute after, with no `0xF6` and no close. This held both with an image in the removable drive
+and with the drive parked empty. The tunnel stays on the token it was opened with. Since a drive
+is still connected, ipmi-connect sends `MEDIA_STATE` 1 to the new KVM session once it is
+validated. Swapping and re-attaching images over the same tunnel afterwards worked.
+
 **Writes and the removable drive (verified)**: the host mounted a FAT floppy image and a 16 MB
 FAT removable (`HDMEDIA`) image, wrote a file to each with WRITE(10), and the file was in the
 image afterwards. The BMC never sent `0xF4` during the removable test.
