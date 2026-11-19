@@ -507,7 +507,7 @@ func TestMediaViewCloseKeepsTunnelPoolCloseEndsIt(t *testing.T) {
 func TestMediaPrivateOpcodes(t *testing.T) {
 	h := newMediaHarness(t)
 	f := h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
-	// The BMC sends 0xF3 (with one data byte) about a minute in; JViewer answers 05/20/00.
+	// The BMC sends the CD drive 0xF3 (with one data byte) every minute; JViewer answers 05/20/00.
 	probe := func(what string) {
 		t.Helper()
 		f.seq++

@@ -207,9 +207,12 @@ viewer's wire behaviour; offsets count from the start of the frame.
   status and sense at 53..56, data length at 57 and data from 61, at most 128 KiB. The host's
   first commands were TEST UNIT READY, READ TOC, READ CAPACITY and READ(10).
 - **Private opcodes**: `0xF6` (BMC) stops the drive; `0xF4` (BMC, hard disk only) asks for the
-  drive type, which the client appends as one byte after an empty reply. About a minute after a
-  drive connects the BMC sends `0xF3`, with one data byte and device and protocol bytes 0; the
-  viewer answers CHECK CONDITION `05/20/00` (invalid command), with no data **(verified)**.
+  drive type, which the client appends as one byte after an empty reply. On the CD drive the
+  BMC sends `0xF3` about a minute after the drive connects and then every minute, with one data
+  byte (0) and device and protocol bytes 0. It goes on while the drive is empty (ejected, tunnel
+  kept open). The viewer answers CHECK CONDITION `05/20/00` (invalid command), with no data
+  **(verified)**. On the removable drive the BMC sent no private opcode at all in two sessions of
+  3.5 to 4 minutes **(verified)**.
 - **Media state**: the client sends IVTP `MEDIA_STATE` (24) on the KVM channel, `status` 1 when
   its first drive connects and 0 when the last one closes. The BMC does not answer it.
 - There is no goodbye packet and no client keepalive: the client closes the socket.

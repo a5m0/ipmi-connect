@@ -366,7 +366,7 @@ func (p *mediaPool) serve(t *mediaTunnel, r *bufio.Reader) {
 			setIUSBChecksum(rep)
 		default:
 			if req[scsiCDBAt] >= opMediaPrivate {
-				// Other private opcodes, such as the 0xF3 the BMC sends about a minute in:
+				// Other private opcodes, such as the 0xF3 the BMC sends the CD drive every minute:
 				// JViewer answers them as an invalid command, whatever is in the drive.
 				rep = scsiReply(req, 1, 0x05, 0x20, 0, nil)
 				break
