@@ -83,3 +83,27 @@ Use a test server whose host OS you can lose, on a management network.
 
 - [ ] `ipmi-connect` (desktop mode) opens Safari/Chrome; trust store under
       `~/Library/Application Support/ipmi-connect/`.
+
+## MegaRAC smoke test
+
+`test/e2e/megarac-smoke.sh` is an opt-in check against a real AMI MegaRAC BMC (e.g. the ASUS
+ASMB8-iKVM); CI never runs it. It builds ipmi-connect, connects with `--no-browser` (no browser
+is attached, so no keyboard, mouse, power or media input reaches the host), waits for
+`KVM session validated` and the first `Host video mode`, holds the session, sends SIGINT and
+passes only if the BMC was logged out (`Logged out of`) and nothing reconnected.
+
+```sh
+IPMI_CONNECT_SMOKE_HOST=bmc.example IPMI_CONNECT_SMOKE_USER=admin \
+IPMI_CONNECT_SMOKE_PASSWORD=... test/e2e/megarac-smoke.sh
+```
+
+Optional: `IPMI_CONNECT_SMOKE_FINGERPRINT` (the SHA-256 noted above, passed as
+`--trust-fingerprint` and pinned in your trust store), `IPMI_CONNECT_SMOKE_LEGACY_TLS=1`
+(`--allow-legacy-tls`), `IPMI_CONNECT_SMOKE_HOLD` (seconds, default 30),
+`IPMI_CONNECT_SMOKE_TIMEOUT` (seconds to wait for validation and video, default 60) and
+`IPMI_CONNECT_SMOKE_TYPE` (default `megarac`). It never prompts: with an unpinned certificate and
+no fingerprint it fails and shows the fingerprint the BMC presented; check it before rerunning
+with it. The password reaches ipmi-connect only through `$IPMI_CONNECT_PASSWORD`, and the
+console link is never printed.
+
+- [ ] `test/e2e/megarac-smoke.sh` passes (record the video mode and hold time).
