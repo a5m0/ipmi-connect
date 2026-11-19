@@ -96,6 +96,40 @@ try {
   if (await page.isVisible('#pastePanel')) fail('the type panel did not close');
   ok('type panel types its text (with Enter), keeps it on request, and closes');
 
+  // From Clipboard: where navigator.clipboard.readText is refused (the desktop window's
+  // webview), the panel reads the native clipboard through GET /api/clipboard, but only when
+  // the status says the server has one. fakeapp has none, so the route is stubbed here.
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { readText: () => Promise.reject(new DOMException('refused', 'NotAllowedError')) } });
+  });
+  const clipboardAsks = [];
+  await page.route('**/api/clipboard', (route) => {
+    clipboardAsks.push(route.request().headers().authorization || '');
+    route.fulfill({ status: 200, contentType: 'application/json', headers: { 'Cache-Control': 'no-store' }, body: JSON.stringify({ text: 'from the native clipboard' }) });
+  });
+  await page.click('#btnPaste');
+  await page.waitForSelector('#pastePanel:not([hidden])');
+  await page.click('#btnPasteClipboard');
+  await page.waitForSelector('.toast >> text=blocked clipboard access', { timeout: 5000 });
+  if (clipboardAsks.length) fail('asked the server for the clipboard although it has none');
+  if (await page.inputValue('#pasteText') !== 'ls') fail('a refused clipboard read changed the text');
+  ok('a refused clipboard read without a native clipboard says so and leaves the text alone');
+
+  await page.route('**/api/status', async (route) => {
+    const resp = await route.fetch();
+    route.fulfill({ response: resp, json: Object.assign(await resp.json(), { clipboard: true }) });
+  });
+  await page.waitForResponse((r) => r.url().endsWith('/api/status'), { timeout: 10000 });
+  await page.click('#btnPasteClipboard');
+  await page.waitForFunction(() => document.getElementById('pasteText').value === 'from the native clipboard', null, { timeout: 5000 });
+  if (clipboardAsks.length !== 1 || !clipboardAsks[0].startsWith('Bearer ')) fail(`native clipboard asked ${clipboardAsks.length} times, auth "${clipboardAsks[0]}"`);
+  if (!(await page.textContent('#pasteCount')).startsWith('25 /')) fail('character count not updated after the native clipboard read');
+  await page.unroute('**/api/status');
+  await page.unroute('**/api/clipboard');
+  await page.fill('#pasteText', 'ls');
+  await page.click('#btnClosePaste');
+  ok('From Clipboard falls back to the native clipboard when readText is refused');
+
   // Secondary buttons look like buttons, and selects are drawn by the page in the dark theme.
   const look = await page.evaluate(() => {
     const btn = getComputedStyle(document.getElementById('btnSecurityDone'));

@@ -37,6 +37,7 @@ import { setupView } from '/view.js';
   // State
   let ws = null;
   let saveDialog = false; // the desktop window saves screenshots with a native Save dialog
+  let nativeClipboard = false; // the desktop window reads the clipboard through GET /api/clipboard
   let isConnected = false;
   let currentPowerAction = null;
   let currentPowerTitle = '';
@@ -113,7 +114,7 @@ import { setupView } from '/view.js';
     setupMacros();
     setupSessionButtons();
     media = setupMedia(apiFetch);
-    paste = setupPaste(sendMessage);
+    paste = setupPaste(sendMessage, apiFetch, () => nativeClipboard);
     setupView(canvas, document.getElementById('viewport'), () => isConnected);
     setupFullscreenAndScreenshot();
     pollStatus();
@@ -170,6 +171,7 @@ import { setupView } from '/view.js';
       if (!resp.ok) return;
       const data = await resp.json();
       saveDialog = !!data.save_dialog;
+      nativeClipboard = !!data.clipboard;
 
       // No BMC: the connection manager; a BMC: the console and its socket.
       const was = phase;

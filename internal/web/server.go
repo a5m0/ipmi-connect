@@ -55,6 +55,9 @@ type Server struct {
 	OnShutdown  func()        // called when the UI asks the application to quit
 	PickFile    FilePicker    // native file chooser (portal); nil when unavailable
 	SaveFile    FileSaver     // native Save dialog (desktop window); nil in the browser build
+	// ReadClipboard reads the system clipboard for the desktop window, whose webview refuses
+	// navigator.clipboard.readText; nil in the browser build.
+	ReadClipboard ClipboardReader
 
 	// After a power action the power state is re-read this often, for this long.
 	powerFollowEvery time.Duration
@@ -148,6 +151,9 @@ type FilePicker func(ctx context.Context, title string, directory bool) ([]strin
 // FileSaver asks the user where to save data with the desktop's native Save dialog and writes
 // it there. It returns the path written, or "" if the user cancelled.
 type FileSaver func(ctx context.Context, title, suggestedName string, data []byte) (string, error)
+
+// ClipboardReader returns the text on the desktop's clipboard ("" when it holds none).
+type ClipboardReader func(ctx context.Context) (string, error)
 
 // NewServer initializes a new Web UI server.
 func NewServer(port int, state bmc.SessionState) *Server {
@@ -305,6 +311,7 @@ func (s *Server) routes() (http.Handler, error) {
 	s.mediaRoutes(mux)
 	mux.HandleFunc("GET /api/screenshot.png", s.handleScreenshot)
 	mux.HandleFunc("POST /api/screenshot/save", s.handleScreenshotSave)
+	mux.HandleFunc("GET /api/clipboard", s.handleClipboard)
 	mux.HandleFunc("GET /ws", s.handleWS)
 	return s.guard(mux), nil
 }

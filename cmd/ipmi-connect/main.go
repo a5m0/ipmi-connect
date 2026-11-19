@@ -219,6 +219,7 @@ func run(opts options, desktop bool) error {
 // the window.
 func serveInWindow(ctx context.Context, a *app, ui nativeUI, listener net.Listener, shutdown func()) error {
 	a.server.SaveFile = ui.SaveFile
+	a.server.ReadClipboard = ui.ReadClipboard
 	if a.server.PickFile == nil { // the FileChooser portal is preferred where there is one
 		a.server.PickFile = ui.PickFiles
 	}
