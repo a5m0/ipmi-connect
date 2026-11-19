@@ -12,6 +12,7 @@ Reverse-engineering notes for the BMCs that `ipmi-connect` talks to. Examples us
 | [security/threat-model.md](security/threat-model.md) | Threats, mitigations and remaining risks |
 | [security/sandbox.md](security/sandbox.md) | Flatpak permissions, portals and network limits |
 | [testing/hardware-validation.md](testing/hardware-validation.md) | Manual checks that need real BMCs and desktops |
+| [testing/jviewer-capture.md](testing/jviewer-capture.md) | Capturing AMI's JViewer through `tools/megarac-capture` to compare protocols |
 | [implementation-plan.md](implementation-plan.md) | Work log: plan, decisions, findings, status |
 
 ## Tested hardware & firmware

@@ -222,7 +222,8 @@ leaves the auth unanswered, and an attempt in that window holds the slot again. 
 waits, the web interface stalls too. Sending `JVIEWER DISCONNECT` on the media tunnel before
 closing did not change this.
 
-**JViewer does the same (verified)**. A capture of the vendor viewer on the same board:
+**JViewer does the same (verified)**. A capture of the vendor viewer on the same board (made
+with `tools/megarac-capture`; see [testing/jviewer-capture.md](testing/jviewer-capture.md)):
 
 - Disconnecting a drive closes its socket (no goodbye packet), then sends `MEDIA_STATE` 0.
 - Connecting the CD again, a minute later in the same KVM session, got no auth answer in eleven
