@@ -184,7 +184,7 @@ func validate(p *Profile) error {
 	switch p.Vendor {
 	case "", "auto":
 		p.Vendor = "auto"
-	case string(bmc.TargetDell), string(bmc.TargetSupermicro):
+	case string(bmc.TargetDell), string(bmc.TargetSupermicro), string(bmc.TargetMegaRAC):
 	default:
 		return fmt.Errorf("unknown vendor %q", p.Vendor)
 	}

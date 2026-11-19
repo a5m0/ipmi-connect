@@ -30,6 +30,7 @@ func builtinVendors() map[bmc.TargetType]*Vendor {
 	return map[bmc.TargetType]*Vendor{
 		bmc.TargetDell:       dellVendor(),
 		bmc.TargetSupermicro: supermicroVendor(),
+		bmc.TargetMegaRAC:    megaracVendor(),
 	}
 }
 

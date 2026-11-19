@@ -7,6 +7,7 @@ const (
 	TargetAuto       TargetType = "auto"
 	TargetDell       TargetType = "dell"
 	TargetSupermicro TargetType = "supermicro"
+	TargetMegaRAC    TargetType = "megarac" // AMI MegaRAC SP (ASUS ASMB8-iKVM)
 )
 
 // SessionState holds status and telemetry of an active BMC session

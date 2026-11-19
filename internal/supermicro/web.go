@@ -77,11 +77,8 @@ func (w *WebSession) do(method, path string, form url.Values) (string, error) {
 }
 
 // errNotATENLogin means /cgi/login.cgi did not answer like ATEN's login page (as opposed to
-// rejecting the password), so the BMC may use another web interface.
+// rejecting the password): the BMC may not be an ATEN one.
 var errNotATENLogin = errors.New("the BMC did not answer like an ATEN web login")
-
-// Flavor names the BMC for logs and the console's model line.
-func (w *WebSession) Flavor() string { return "Supermicro (ATEN iKVM)" }
 
 // Login authenticates and keeps the SID cookie.
 func (w *WebSession) Login() error {

@@ -42,14 +42,14 @@ func printUsage() {
 	name := os.Args[0]
 	p := func(format string, a ...any) { fmt.Fprintf(os.Stderr, format, a...) }
 	p("Usage: %s [--desktop] [options]\n       %s <host> [options]\n\n", name, name)
-	p("Browser KVM console for legacy Dell (Avocent) and Supermicro (ATEN) BMCs.\n")
+	p("Browser KVM console for legacy Dell (Avocent), Supermicro (ATEN) and AMI MegaRAC BMCs.\n")
 	p("Without a host it starts the desktop connection manager in your browser.\n\n")
 	p("Options:\n")
 	p("  --desktop                 Start the connection manager (the default without a host)\n")
 	p("  -u, --user <username>     BMC username (default: $%s, else root)\n", envUser)
 	p("  -p, --pass <password>     Deprecated: visible in the process list. Use $%s\n", envPassword)
 	p("                            or the prompt.\n")
-	p("  --type <auto|dell|supermicro>  Force BMC vendor type (default: auto)\n")
+	p("  --type <auto|dell|supermicro|megarac>  Force BMC vendor type (default: auto)\n")
 	p("  --web-port <port>         Local console port (default: 8080 with a host, else any free port)\n")
 	p("  --no-browser              Do not open the web browser; print the link\n")
 	p("  --idle-timeout <duration> Disconnect and quit after this long with no browser\n")

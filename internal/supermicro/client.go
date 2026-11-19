@@ -32,11 +32,10 @@ var inBandPower = map[bmc.PowerAction]byte{
 // Client keeps a Supermicro KVM session up, reconnecting with a fresh one-time ticket as needed,
 // and implements bmc.Console on whichever session is current.
 type Client struct {
-	host           string
-	user, password string
-	ep             *bmc.Endpoint
-	web            webAPI
-	dial           func(ctx context.Context, port int) (net.Conn, error)
+	host string
+	ep   *bmc.Endpoint
+	web  *WebSession
+	dial func(ctx context.Context, port int) (net.Conn, error)
 
 	mu      sync.Mutex
 	session *Session
@@ -52,12 +51,10 @@ type Client struct {
 func NewClient(ep *bmc.Endpoint, user, password string) *Client {
 	_ = ep.AllowPort(defaultVMediaPort)
 	c := &Client{
-		host:     ep.Host,
-		user:     user,
-		password: password,
-		ep:       ep,
-		web:      NewWebSession(ep, user, password),
-		stopped:  make(chan struct{}),
+		host:    ep.Host,
+		ep:      ep,
+		web:     NewWebSession(ep, user, password),
+		stopped: make(chan struct{}),
 		dial: func(ctx context.Context, port int) (net.Conn, error) {
 			if err := ep.AllowPort(port); err != nil {
 				return nil, err
@@ -71,35 +68,8 @@ func NewClient(ep *bmc.Endpoint, user, password string) *Client {
 	return c
 }
 
-// webAPI is the BMC's web session: ATEN's own CGI pages (Supermicro) or AMI MegaRAC's /rpc
-// pages (ASUS ASMB8). Both hand out tickets for the same ATEN iKVM.
-type webAPI interface {
-	Login() error
-	FetchTicket(host string) (Ticket, error)
-	PowerCGI(action bmc.PowerAction) error
-	PowerStatus() (string, error)
-	Logout()
-	Flavor() string
-}
-
 // Login authenticates to the web interface; call it before Run so bad credentials fail fast.
-// When the BMC has no ATEN login page it tries the MegaRAC one, and keeps whichever worked.
-func (c *Client) Login() error {
-	err := c.web.Login()
-	if err == nil || !errors.Is(err, errNotATENLogin) {
-		return err
-	}
-	log.Printf("[Supermicro] %v; trying the MegaRAC web login", err)
-	mr := NewMegaRACWeb(c.ep, c.user, c.password)
-	if merr := mr.Login(); merr != nil {
-		return fmt.Errorf("%w (ATEN login: %v)", merr, err)
-	}
-	c.web = mr
-	return nil
-}
-
-// Flavor names the web interface in use, once Login has chosen it.
-func (c *Client) Flavor() string { return c.web.Flavor() }
+func (c *Client) Login() error { return c.web.Login() }
 
 func nextDelay(d time.Duration) time.Duration { return min(2*d, reconnectMax) }
 

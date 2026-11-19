@@ -60,10 +60,11 @@ It has been tested on the two boards I own. Other BMCs running the same firmware
 | Power control | Works | Status verified; commands over the KVM socket or `ipmi.cgi` |
 | Virtual media | Works: ISO on CD/DVD (booted an installer), IMG on removable or floppy (read-write), Create Image, transfer graph, USB reset | Works: ISO on CD, IMG on removable or floppy (read-write), Create Image (blank or from a folder), all verified byte-exact on hardware; one drive at a time, see known issues |
 
-**ASUS ASMB8-iKVM (experimental, not yet tested on hardware).** This module pairs the ATEN
-iKVM with AMI MegaRAC's web interface on an ASPEED AST2400. Use `--type supermicro` (or auto
-detection): when the BMC has no ATEN login page, ipmi-connect logs in through the MegaRAC one
-(`/rpc/WEBSES/create.asp`) and decodes the ASPEED video. Reports from real boards are welcome.
+**ASUS ASMB8-iKVM (experimental).** This module runs AMI MegaRAC SP on an ASPEED AST2400, with
+the KVM tunnelled through the web server's TLS port (`--type megarac`, or auto detection). Login,
+power status and the KVM session with live video are verified on one board; keyboard, mouse and
+power commands are implemented but not yet tested on hardware, and virtual media is not
+implemented yet. See [docs/asus-asmb8-ikvm.md](docs/asus-asmb8-ikvm.md).
 
 The console also has a **type text** panel (paste or write text, and it is typed on the host as
 keystrokes, optionally followed by Enter; Ctrl/Cmd+Shift+V on the console types the clipboard
@@ -337,6 +338,7 @@ internal/
   bmc/                 Shared types, the BMC endpoint (scoped dialler and HTTP client), password prompt
   dell/                Avocent client: web session, APCP channels, heartbeat, video, input, power
   supermicro/          ATEN client: CGI session, RFB handshake and input, power
+  megarac/             AMI MegaRAC client: RPC session, single-port KVM tunnel, IVTP, input, power
   web/                 Local HTTP/WebSocket server, key macros, frame broadcast
     static/            Embedded browser UI
   aspeed/              ASPEED video decoder (Go port of Aspeed's MPL-2.0 reference)

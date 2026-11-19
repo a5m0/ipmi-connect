@@ -1,7 +1,9 @@
 package session
 
 import (
+	"compress/gzip"
 	"context"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -66,8 +68,11 @@ func detectByPort(ctx context.Context, ep *bmc.Endpoint, vendors map[bmc.TargetT
 	return ""
 }
 
-// detectByBanner reads the web server's Server header. Call it only once the web server's
-// certificate is trusted: ep's client enforces the policy.
+// maxBannerBody bounds how much of the login page detection reads.
+const maxBannerBody = 64 << 10
+
+// detectByBanner reads the web server's Server header, or failing that its login page. Call it
+// only once the web server's certificate is trusted: ep's client enforces the policy.
 func detectByBanner(ctx context.Context, ep *bmc.Endpoint) bmc.TargetType {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ep.BaseURL()+"/", nil)
 	if err != nil {
@@ -85,6 +90,21 @@ func detectByBanner(ctx context.Context, ep *bmc.Endpoint) bmc.TargetType {
 		return bmc.TargetDell
 	case strings.Contains(server, "lighttpd"):
 		return bmc.TargetSupermicro
+	}
+	// AMI MegaRAC SP sends no Server header; its login page is titled "Megarac SP". It sends the
+	// page gzip-encoded even though the client does not ask for compression.
+	var body io.Reader = resp.Body
+	if strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {
+		gz, err := gzip.NewReader(io.LimitReader(resp.Body, maxBannerBody))
+		if err != nil {
+			return ""
+		}
+		defer gz.Close()
+		body = gz
+	}
+	page, _ := io.ReadAll(io.LimitReader(body, maxBannerBody))
+	if strings.Contains(strings.ToLower(string(page)), "<title>megarac") {
+		return bmc.TargetMegaRAC
 	}
 	return ""
 }

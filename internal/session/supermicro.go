@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 
@@ -46,12 +45,12 @@ func connectSupermicro(ctx context.Context, ep *bmc.Endpoint, user, password str
 	runCtx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go func() { defer wg.Done(); pollSupermicroPower(runCtx, d, client) }()
+	go func() { defer wg.Done(); pollPower(runCtx, d, client, smPowerPollInterval, "[Supermicro]") }()
 	client.Start(runCtx, d)
 	var once sync.Once
 	return &Live{
 		Console: client,
-		Model:   client.Flavor(),
+		Model:   "Supermicro (ATEN iKVM)",
 		Stop: func() {
 			once.Do(func() {
 				cancel()
@@ -68,27 +67,4 @@ func connectSupermicro(ctx context.Context, ep *bmc.Endpoint, user, password str
 			}
 		},
 	}, nil
-}
-
-// pollSupermicroPower refreshes the reported power state.
-func pollSupermicroPower(ctx context.Context, d Display, client *supermicro.Client) {
-	update := func() {
-		state, err := client.PowerStatus()
-		if err != nil {
-			log.Printf("[Supermicro] Power status: %v", err)
-			state = bmc.PowerStateUnknown // a stale value could hide the real state
-		}
-		d.SetPower(state)
-	}
-	update()
-	ticker := time.NewTicker(smPowerPollInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			update()
-		}
-	}
 }

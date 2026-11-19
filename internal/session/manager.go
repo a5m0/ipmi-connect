@@ -307,7 +307,7 @@ func (m *Manager) connect(ctx context.Context, req Request) (*Live, *bmc.Endpoin
 	if vendor == nil { // ports did not tell; ask the (now trusted) web server
 		vendor = m.vendors[detectByBanner(ctx, ep)]
 		if vendor == nil {
-			return nil, nil, nil, &InputError{errors.New("could not detect the BMC type; choose Dell or Supermicro")}
+			return nil, nil, nil, &InputError{errors.New("could not detect the BMC type; choose Dell, Supermicro or AMI MegaRAC")}
 		}
 		// The vendor's own channels were not covered by the probe: check them now.
 		if err := m.establishTrust(ctx, ep, vendor, req); err != nil {

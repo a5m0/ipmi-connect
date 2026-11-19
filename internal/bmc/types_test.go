@@ -12,6 +12,9 @@ func TestTargetTypeConstants(t *testing.T) {
 	if TargetSupermicro != "supermicro" {
 		t.Errorf("expected TargetSupermicro='supermicro', got %s", TargetSupermicro)
 	}
+	if TargetMegaRAC != "megarac" {
+		t.Errorf("expected TargetMegaRAC='megarac', got %s", TargetMegaRAC)
+	}
 }
 
 func TestPowerActionConstants(t *testing.T) {

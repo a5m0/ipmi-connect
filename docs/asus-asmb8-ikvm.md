@@ -17,7 +17,11 @@ No code was copied.
 
 ## 1. Web Interface
 
-All requests go to HTTPS 443 (HTTP 80 also works and is not used).
+All requests go to HTTPS 443 (HTTP 80 also works and is not used). The certificate is
+self-signed, and the server offers only RSA key exchange (no forward secrecy), so ipmi-connect
+asks for the obsolete-TLS consent **(verified)**. It sends no `Server` header; `/` redirects to
+`/index.html`, a page titled `Megarac SP` that is gzip-encoded even when compression was not
+requested **(verified)**. Auto detection uses that title.
 
 | Step | Request | Notes |
 | :--- | :--- | :--- |
