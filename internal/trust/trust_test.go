@@ -242,6 +242,89 @@ func TestLegacyTLSNeedsAuthorisation(t *testing.T) {
 	}
 }
 
+// TestLegacyTLSPrefersRSAGCMOverCBC emulates an AMI MegaRAC BMC that offers TLS 1.2 with only
+// static-RSA suites, GCM and CBC: with consent the connection must use GCM (the client's offer
+// decides, since Go ignores suite order), and is still legacy because RSA key exchange has no
+// forward secrecy.
+func TestLegacyTLSPrefersRSAGCMOverCBC(t *testing.T) {
+	cert := testRSACert(t, "127.0.0.1")
+	bmc := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12, MaxVersion: tls.VersionTLS12,
+		CipherSuites: []uint16{tls.TLS_RSA_WITH_AES_256_GCM_SHA384, tls.TLS_RSA_WITH_AES_128_CBC_SHA}, //nolint:gosec // emulating an old BMC
+	}
+	addr, _ := tlsServer(t, bmc)
+	store := NewMemoryStore()
+	_ = store.Trust("127.0.0.1", Fingerprint(cert.Leaf), false)
+	p := &Policy{Store: store, Device: "127.0.0.1"}
+
+	// Without consent the modern offer cannot complete a handshake at all.
+	if err := roundTrip(t, p, addr, "127.0.0.1"); err == nil {
+		t.Fatal("static-RSA suites accepted without authorisation")
+	}
+	// And should a legacy suite be negotiated anyway, the policy refuses it.
+	cfg := p.ClientConfig("127.0.0.1", "https")
+	cfg.CipherSuites = baseConfig("127.0.0.1", true).CipherSuites
+	conn, err := tls.Dial("tcp", addr, cfg)
+	if err == nil {
+		_ = conn.Close()
+	}
+	var legacyErr *LegacyTLSRequiredError
+	if !errors.As(err, &legacyErr) {
+		t.Fatalf("unauthorised RSA-GCM = %v, want LegacyTLSRequiredError", err)
+	}
+	if legacyErr.Cipher != "TLS_RSA_WITH_AES_256_GCM_SHA384" {
+		t.Errorf("refused cipher = %q, want the RSA-GCM suite", legacyErr.Cipher)
+	}
+
+	if err := store.SetConsent("127.0.0.1", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := roundTrip(t, p, addr, "127.0.0.1"); err != nil {
+		t.Fatalf("authorised legacy TLS refused: %v", err)
+	}
+	c := p.Connections()["https"]
+	if c.Cipher != "TLS_RSA_WITH_AES_256_GCM_SHA384" || c.Version != "TLS 1.2" {
+		t.Errorf("negotiated %s %s, want TLS 1.2 TLS_RSA_WITH_AES_256_GCM_SHA384", c.Version, c.Cipher)
+	}
+	if !c.Legacy {
+		t.Errorf("connection not marked legacy: %+v", c)
+	}
+}
+
+func TestIsLegacy(t *testing.T) {
+	tests := []struct {
+		version, suite uint16
+		want           bool
+	}{
+		{tls.VersionTLS13, tls.TLS_AES_128_GCM_SHA256, false},
+		{tls.VersionTLS12, tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, false},
+		{tls.VersionTLS12, tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, false},
+		{tls.VersionTLS12, tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, false},
+		// No forward secrecy: static RSA key exchange, even with an AEAD.
+		{tls.VersionTLS12, tls.TLS_RSA_WITH_AES_128_GCM_SHA256, true},
+		{tls.VersionTLS12, tls.TLS_RSA_WITH_AES_256_GCM_SHA384, true},
+		// CBC and 3DES.
+		{tls.VersionTLS12, tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, true},
+		{tls.VersionTLS12, tls.TLS_RSA_WITH_AES_256_CBC_SHA, true},
+		{tls.VersionTLS12, tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA, true},
+		// Obsolete protocol versions, whatever the suite.
+		{tls.VersionTLS11, tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, true},
+		{tls.VersionTLS10, tls.TLS_RSA_WITH_AES_256_CBC_SHA, true},
+	}
+	for _, tt := range tests {
+		if got := IsLegacy(tt.version, tt.suite); got != tt.want {
+			t.Errorf("IsLegacy(%s, %s) = %v, want %v", tls.VersionName(tt.version), tls.CipherSuiteName(tt.suite), got, tt.want)
+		}
+	}
+	// Every suite offered only with consent must be classified legacy.
+	for _, s := range legacyCipherSuites {
+		if !IsLegacy(tls.VersionTLS12, s) {
+			t.Errorf("legacy-only suite %s not classified legacy", tls.CipherSuiteName(s))
+		}
+	}
+}
+
 func TestProbeReportsCertificateWithoutSendingData(t *testing.T) {
 	cert := testCert(t, "127.0.0.1", nil, false)
 	addr, got := tlsServer(t, &tls.Config{Certificates: []tls.Certificate{cert}})

@@ -18,7 +18,8 @@ type Device struct {
 	// Fingerprints are the SHA-256 leaf fingerprints accepted for any of the device's TLS
 	// endpoints (its web server and, on Dell, its KVM port).
 	Fingerprints []string `json:"fingerprints,omitempty"`
-	// LegacyTLS records consent to TLS 1.0/1.1 and CBC/3DES suites for this device.
+	// LegacyTLS records consent to TLS 1.0/1.1 and suites without forward secrecy / CBC / 3DES
+	// for this device.
 	LegacyTLS bool `json:"legacy_tls,omitempty"`
 	// InsecureChannels records consent to channels without effective encryption (plain RFB
 	// KVM, RC4 virtual media under a public key, or an APCP channel without TLS).
