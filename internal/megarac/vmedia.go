@@ -192,6 +192,13 @@ type mediaAuthError struct{ err error }
 func (e mediaAuthError) Error() string { return e.err.Error() }
 func (e mediaAuthError) Unwrap() error { return e.err }
 
+// active reports whether media redirection is on: a tunnel is open, with or without an image.
+func (p *mediaPool) active() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stateOn
+}
+
 // stateOffLocked notes that media redirection stopped if no tunnel is left, and reports
 // whether to send that.
 func (p *mediaPool) stateOffLocked() bool {

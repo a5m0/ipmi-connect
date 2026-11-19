@@ -14,9 +14,11 @@ import (
 	"github.com/a5m0/ipmi-connect/internal/vmedia"
 )
 
+// reconnectMin is the first delay before a new KVM session; a variable so tests can shorten it.
+var reconnectMin = 2 * time.Second
+
 const (
 	dialTimeout       = 5 * time.Second
-	reconnectMin      = 2 * time.Second
 	reconnectMax      = 30 * time.Second
 	stableSession     = 30 * time.Second // a session this long resets the backoff
 	logoutWaitTimeout = 5 * time.Second
@@ -201,6 +203,15 @@ func (c *Client) serveOnce(ctx context.Context, sink Sink) error {
 		clientIP = a.IP.String()
 	}
 	s := newSession(bc.Conn, bc.r, credentials{kvmToken: l.KVMToken, webCookie: l.WebCookie, user: c.user, clientIP: clientIP})
+	s.onValidated = func() {
+		// A drive that outlived the previous KVM session is still connected: the pool only
+		// reports changes, so tell this session, as the old one was told when the drive came up.
+		if c.media != nil && c.media.active() {
+			if err := s.SetMediaState(true); err != nil {
+				log.Printf("[MegaRAC] Media state on the new KVM session: %v", err)
+			}
+		}
+	}
 	c.mu.Lock()
 	c.session, c.tunnelAt = s, l.WebPort
 	c.mu.Unlock()

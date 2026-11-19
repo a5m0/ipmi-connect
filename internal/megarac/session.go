@@ -95,6 +95,10 @@ type Session struct {
 	r    *bufio.Reader
 	cred credentials
 
+	// onValidated, if set before Run, is called on the session loop once the BMC has validated
+	// the session, after what JViewer sends at that point.
+	onValidated func()
+
 	out       chan []byte
 	done      chan struct{} // closed when Run returns
 	validated atomic.Bool
@@ -212,6 +216,9 @@ func (s *Session) handle(m message, sink Sink) error {
 		s.enqueue(header(typePowerStatus, 0, 0))
 		s.enqueue(append(header(typeDisplayLock, 1, 0), 2))
 		s.enqueue(header(typeGetUserMacro, 0, 0))
+		if s.onValidated != nil {
+			s.onValidated()
+		}
 	case typeStopSession:
 		reason, ok := stopReasons[m.Status]
 		if !ok {

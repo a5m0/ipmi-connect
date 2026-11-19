@@ -691,3 +691,34 @@ func TestMediaUSBResetUnsupported(t *testing.T) {
 		t.Errorf("USBReset = %v", err)
 	}
 }
+
+func TestClientMediaClosedWithTheKVM(t *testing.T) {
+	// Slow enough that the media tunnel's close is handled before the new KVM session starts.
+	fastReconnect(t, 300*time.Millisecond)
+	f := newFakeBMCServer(t)
+	c, m, _, stop := startMappedCD(t, f)
+
+	// The BMC drops the KVM session and the media tunnel with it.
+	f.dropKVM()
+	_ = m.conn.Close()
+	waitFor(t, "the drive to be released", func() bool {
+		st := c.MediaStatus()
+		return len(st.Drives) == 0 && st.Error != ""
+	})
+	waitFor(t, "the new KVM session", func() bool { return f.servedKVM() == 2 })
+	// Mapping again must wait out the BMC's two minutes rather than dial into a held slot.
+	im := c.MediaStatus().Images[0]
+	err := c.MapImage(im.ID, bmc.TargetCD)
+	if err == nil || !strings.Contains(err.Error(), "try again in") {
+		t.Errorf("MapImage straight after: %v, want the two-minute wait", err)
+	}
+	select {
+	case <-f.media:
+		t.Error("a media tunnel was dialled inside the two minutes")
+	default:
+	}
+	stop()
+	if got := f.kvmEvents(2); strings.Contains(got, "media 1") {
+		t.Errorf("new KVM session messages %q: no drive is connected", got)
+	}
+}

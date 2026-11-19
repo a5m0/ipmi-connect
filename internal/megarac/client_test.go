@@ -54,7 +54,10 @@ type fakeBMCServer struct {
 	srv     *httptest.Server
 	mu      sync.Mutex
 	tunnels int
-	events  []string // media state and STOP_SESSION messages on the KVM tunnel
+	events  []string         // media state and STOP_SESSION messages on the KVM tunnel
+	byKVM   map[int][]string // the same, by KVM tunnel (1 = the first)
+	video   net.Conn         // the current KVM tunnel
+	served  int              // the last KVM tunnel to have had its first frame
 	closing chan struct{}
 	media   chan *fakeMediaBMC // media tunnels, after their tunnel request
 }
@@ -122,12 +125,17 @@ func (f *fakeBMCServer) serve(c net.Conn) {
 	defer c.Close()
 	f.mu.Lock()
 	f.tunnels++
+	n := f.tunnels
+	f.video = c
 	f.mu.Unlock()
 	_, _ = c.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
 	b := &fakeBMC{t: f.t, conn: c, r: r}
 	b.handshake(validationOK)
 	frames := readRecording(f.t)
 	b.frame(frames[0])
+	f.mu.Lock()
+	f.served = n
+	f.mu.Unlock()
 	// Record the client's media state and STOP_SESSION messages until it leaves.
 	_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
 	for {
@@ -137,18 +145,99 @@ func (f *fakeBMCServer) serve(c net.Conn) {
 		}
 		switch m.Type {
 		case typeMediaState:
-			f.event(fmt.Sprintf("media %d", m.Status))
+			f.event(n, fmt.Sprintf("media %d", m.Status))
 		case typeStopSession:
-			f.event("stop")
+			f.event(n, "stop")
 			return
 		}
 	}
 }
 
-func (f *fakeBMCServer) event(e string) {
+func (f *fakeBMCServer) event(kvm int, e string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.events = append(f.events, e)
+	if f.byKVM == nil {
+		f.byKVM = map[int][]string{}
+	}
+	f.byKVM[kvm] = append(f.byKVM[kvm], e)
+}
+
+// kvmEvents returns the messages seen on KVM tunnel n, joined.
+func (f *fakeBMCServer) kvmEvents(n int) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return strings.Join(f.byKVM[n], ", ")
+}
+
+func (f *fakeBMCServer) kvmTunnels() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.tunnels
+}
+
+// servedKVM returns the last KVM tunnel that got through its handshake and first frame.
+func (f *fakeBMCServer) servedKVM() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.served
+}
+
+// dropKVM closes the current KVM tunnel, as a network failure would.
+func (f *fakeBMCServer) dropKVM() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.video != nil {
+		_ = f.video.Close()
+	}
+}
+
+// fastReconnect shortens the client's reconnect delay for one test.
+func fastReconnect(t *testing.T, d time.Duration) {
+	old := reconnectMin
+	reconnectMin = d
+	t.Cleanup(func() { reconnectMin = old })
+}
+
+// startMappedCD starts a client on f, maps a CD image and returns the client, the BMC end of
+// the media tunnel, the image content and a teardown that leaves as the app does.
+func startMappedCD(t *testing.T, f *fakeBMCServer) (*Client, *fakeMediaBMC, []byte, func()) {
+	t.Helper()
+	ep := testEndpoint(t, f.ln.Addr().String(), f.srv.Certificate())
+	c := NewClient(ep, "admin", "pw")
+	if err := c.Login(); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	sink := &recordingSink{}
+	ctx, cancel := context.WithCancel(context.Background())
+	var once sync.Once
+	stop := func() { once.Do(func() { c.CloseMedia(); cancel(); c.Logout() }) }
+	t.Cleanup(stop)
+	c.Start(ctx, sink)
+	waitFor(t, "a frame through the tunnel", func() bool { n, _, _, _ := sink.snapshot(); return n > 0 })
+	iso := filepath.Join(t.TempDir(), "test.iso")
+	content := bytes.Repeat([]byte("reconnect"), 4*2048/9+1)[:4*2048]
+	if err := os.WriteFile(iso, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	im, err := c.AddImage(iso, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapped := make(chan error, 1)
+	go func() { mapped <- c.MapImage(im.ID, bmc.TargetCD) }()
+	var m *fakeMediaBMC
+	select {
+	case m = <-f.media:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no media tunnel")
+	}
+	m.accept(1)
+	if err := <-mapped; err != nil {
+		t.Fatalf("MapImage: %v", err)
+	}
+	waitFor(t, "MEDIA_STATE 1 on the first KVM session", func() bool { return f.kvmEvents(1) == "media 1" })
+	return c, m, content, stop
 }
 
 func (f *fakeBMCServer) eventLog() []string {
@@ -286,6 +375,29 @@ func TestClientMapsCDThroughATunnel(t *testing.T) {
 	c.Logout()
 	if got := strings.Join(f.eventLog(), ", "); got != "media 1, media 0, stop" {
 		t.Errorf("KVM messages %q, want media 1, media 0, stop", got)
+	}
+}
+
+func TestClientReconnectKeepsMediaTunnel(t *testing.T) {
+	fastReconnect(t, 50*time.Millisecond)
+	f := newFakeBMCServer(t)
+	_, m, content, stop := startMappedCD(t, f)
+
+	f.dropKVM()
+	waitFor(t, "a second KVM tunnel", func() bool { return f.kvmTunnels() == 2 })
+	// The drive is still connected, so the new KVM session must hear so, as the old one did.
+	waitFor(t, "MEDIA_STATE 1 on the new KVM session", func() bool { return f.kvmEvents(2) == "media 1" })
+	if r := m.scsi([]byte{0x28, 0, 0, 0, 0, 2, 0, 0, 1, 0}, nil); r.status != 0 || !bytes.Equal(r.data, content[2*2048:3*2048]) {
+		t.Errorf("READ after the reconnect: status %d, %d bytes", r.status, len(r.data))
+	}
+	select {
+	case <-f.media:
+		t.Error("the reconnect opened another media tunnel")
+	default:
+	}
+	stop()
+	if got := f.kvmEvents(2); got != "media 1, media 0, stop" {
+		t.Errorf("new KVM session messages %q, want media 1, media 0, stop", got)
 	}
 }
 
