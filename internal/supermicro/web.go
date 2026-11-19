@@ -76,6 +76,13 @@ func (w *WebSession) do(method, path string, form url.Values) (string, error) {
 	return string(data), nil
 }
 
+// errNotATENLogin means /cgi/login.cgi did not answer like ATEN's login page (as opposed to
+// rejecting the password), so the BMC may use another web interface.
+var errNotATENLogin = errors.New("the BMC did not answer like an ATEN web login")
+
+// Flavor names the BMC for logs and the console's model line.
+func (w *WebSession) Flavor() string { return "Supermicro (ATEN iKVM)" }
+
 // Login authenticates and keeps the SID cookie.
 func (w *WebSession) Login() error {
 	req, err := http.NewRequest(http.MethodPost, w.url("/cgi/login.cgi"),
@@ -98,8 +105,13 @@ func (w *WebSession) Login() error {
 			sid = c.Value
 		}
 	}
-	if resp.StatusCode != http.StatusOK || sid == "" || strings.Contains(string(data), "login_alert") {
+	switch {
+	case strings.Contains(string(data), "login_alert"):
 		return errors.New("supermicro login failed: check the username and password")
+	case resp.StatusCode != http.StatusOK:
+		return fmt.Errorf("%w (HTTP %d)", errNotATENLogin, resp.StatusCode)
+	case sid == "":
+		return fmt.Errorf("%w (no SID cookie)", errNotATENLogin)
 	}
 	w.mu.Lock()
 	w.sid = sid

@@ -51,7 +51,7 @@ func connectSupermicro(ctx context.Context, ep *bmc.Endpoint, user, password str
 	var once sync.Once
 	return &Live{
 		Console: client,
-		Model:   "Supermicro (ATEN iKVM)",
+		Model:   client.Flavor(),
 		Stop: func() {
 			once.Do(func() {
 				cancel()

@@ -60,6 +60,11 @@ It has been tested on the two boards I own. Other BMCs running the same firmware
 | Power control | Works | Status verified; commands over the KVM socket or `ipmi.cgi` |
 | Virtual media | Works: ISO on CD/DVD (booted an installer), IMG on removable or floppy (read-write), Create Image, transfer graph, USB reset | Works: ISO on CD, IMG on removable or floppy (read-write), Create Image (blank or from a folder), all verified byte-exact on hardware; one drive at a time, see known issues |
 
+**ASUS ASMB8-iKVM (experimental, not yet tested on hardware).** This module pairs the ATEN
+iKVM with AMI MegaRAC's web interface on an ASPEED AST2400. Use `--type supermicro` (or auto
+detection): when the BMC has no ATEN login page, ipmi-connect logs in through the MegaRAC one
+(`/rpc/WEBSES/create.asp`) and decodes the ASPEED video. Reports from real boards are welcome.
+
 The console also has a **type text** panel (paste or write text, and it is typed on the host as
 keystrokes, optionally followed by Enter; Ctrl/Cmd+Shift+V on the console types the clipboard
 straight away), screenshots, scaling and fullscreen with keyboard lock.
