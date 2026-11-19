@@ -239,7 +239,7 @@ func TestSessionRequiringEncryptionFails(t *testing.T) {
 	}
 }
 
-func TestSessionStopsOnContextAndSendsDisconnect(t *testing.T) {
+func TestSessionStopsOnContextAndSendsStopSession(t *testing.T) {
 	bmcSide, conn := newFakeBMC(t)
 	s := newSession(conn, bufio.NewReader(conn), credentials{kvmToken: "KVMTOKEN0123456", webCookie: "COOKIE123", user: "admin"})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -247,10 +247,13 @@ func TestSessionStopsOnContextAndSendsDisconnect(t *testing.T) {
 	go func() { done <- s.Run(ctx, &recordingSink{}) }()
 	bmcSide.handshake(validationOK)
 	cancel()
+	// JViewer leaves with STOP_SESSION and lets the BMC close the socket.
 	_ = bmcSide.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	line, err := bmcSide.r.ReadString('\n')
-	if err != nil || line != "JVIEWER DISCONNECT Cookie COOKIE123\r\n" {
-		t.Errorf("disconnect line %q, %v", line, err)
+	if peek, _ := bmcSide.r.Peek(7); string(peek) == "JVIEWER" {
+		t.Fatal("sent a JVIEWER text line instead of STOP_SESSION")
+	}
+	if m := bmcSide.expect(typeStopSession); len(m.Payload) != 0 || m.Status != 0 {
+		t.Errorf("STOP_SESSION status %d, %d payload bytes", m.Status, len(m.Payload))
 	}
 	go io.Copy(io.Discard, bmcSide.r)
 	select {

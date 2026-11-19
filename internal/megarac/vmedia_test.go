@@ -483,6 +483,30 @@ func TestMediaViewCloseKeepsTunnelPoolCloseEndsIt(t *testing.T) {
 	}
 }
 
+func TestMediaPrivateOpcodes(t *testing.T) {
+	h := newMediaHarness(t)
+	f := h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
+	// The BMC sends 0xF3 (with one data byte) about a minute in; JViewer answers 05/20/00.
+	probe := func(what string) {
+		t.Helper()
+		f.seq++
+		f.write(scsiRequest(f.seq, []byte{0xF3}, []byte{0}))
+		rep := f.read()
+		if len(rep) != scsiDataAt || rep[53] != 1 || rep[54] != 0x05 || rep[55] != 0x20 || rep[56] != 0 {
+			t.Errorf("%s: 0xF3 reply % x", what, rep[min(len(rep), 53):])
+		}
+	}
+	probe("mapped")
+	if err := h.sess.Unmap(h.diskOf(vmedia.TargetCD)); err != nil {
+		t.Fatal(err)
+	}
+	probe("empty")
+	h.mapParked(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
+	probe("after the swap")
+	// The private opcode must not use up the medium-change report.
+	sense(t, "TEST UNIT READY after 0xF3", f.scsi([]byte{0x00, 0, 0, 0, 0, 0}, nil), 1, 0x06, 0x28, 0)
+}
+
 func TestMediaParkedTunnelLossRedials(t *testing.T) {
 	h := newMediaHarness(t)
 	f := h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})

@@ -47,6 +47,7 @@ func connectMegaRAC(ctx context.Context, ep *bmc.Endpoint, user, password string
 		Model:   "AMI MegaRAC SP",
 		Stop: func() {
 			once.Do(func() {
+				client.CloseMedia() // first, as JViewer does: MEDIA_STATE 0 goes out on the live KVM session
 				cancel()
 				client.Logout() // waits for the KVM session to close first
 				wg.Wait()

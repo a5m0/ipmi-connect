@@ -29,7 +29,7 @@ const (
 	pollInterval = 15 * time.Second
 	// idleDead ends a session that has sent nothing for this long, despite the polls.
 	idleDead = 3 * pollInterval
-	// disconnectWait bounds the wait for the disconnect line to be sent.
+	// disconnectWait bounds the wait for STOP_SESSION to be sent.
 	disconnectWait = 2 * time.Second
 	absoluteMouse  = 2
 )
@@ -128,7 +128,7 @@ func (s *Session) Run(ctx context.Context, sink Sink) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// The writer outlives ctx so that the disconnect line can still go out after a cancel.
+	// The writer outlives ctx so that STOP_SESSION can still go out after a cancel.
 	wctx, stopWriter := context.WithCancel(context.Background())
 	defer stopWriter()
 	writeErr := make(chan error, 1)
@@ -288,11 +288,11 @@ func (s *Session) setStatus(sink Sink, text string) {
 	}
 }
 
-// disconnect sends JViewer's disconnect line, waits briefly for it to go out, then stops the
-// writer.
+// disconnect sends STOP_SESSION, as JViewer does when it exits, waits briefly for it to go out,
+// then stops the writer. The BMC closes the socket in answer.
 func (s *Session) disconnect(stopWriter context.CancelFunc, flushed <-chan struct{}) {
 	select {
-	case s.out <- []byte(disconnectLine(s.cred.webCookie)):
+	case s.out <- stopSession:
 		select {
 		case <-flushed:
 		case <-time.After(disconnectWait):
@@ -302,7 +302,10 @@ func (s *Session) disconnect(stopWriter context.CancelFunc, flushed <-chan struc
 	stopWriter()
 }
 
-// writeLoop sends queued messages until ctx ends; after a disconnect line it signals flushed.
+// stopSession is the STOP_SESSION message the client leaves with.
+var stopSession = header(typeStopSession, 0, 0)
+
+// writeLoop sends queued messages until ctx ends; after STOP_SESSION it signals flushed.
 func (s *Session) writeLoop(ctx context.Context, flushed chan<- struct{}) error {
 	for {
 		select {
@@ -313,7 +316,7 @@ func (s *Session) writeLoop(ctx context.Context, flushed chan<- struct{}) error 
 			if _, err := s.conn.Write(b); err != nil {
 				return err
 			}
-			if len(b) > 7 && string(b[:7]) == "JVIEWER" {
+			if string(b) == string(stopSession) {
 				close(flushed)
 				<-ctx.Done()
 				return nil

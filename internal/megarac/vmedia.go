@@ -21,7 +21,7 @@ const mediaAuthTimeout = 10 * time.Second
 
 // mediaBusyHint explains the BMC's habit, seen on the ASMB8, of keeping a drive's slot for a few
 // minutes after its tunnel closes.
-const mediaBusyHint = "the BMC keeps a drive busy for a few minutes after a logout or a dropped connection; try again shortly"
+const mediaBusyHint = "the BMC keeps a drive busy for a few minutes after its connection drops; try again shortly, or reconnect"
 
 var errMediaUSBReset = errors.New("USB reset is not supported on MegaRAC; eject and map the image again")
 
@@ -279,6 +279,12 @@ func (p *mediaPool) serve(t *mediaTunnel, r *bufio.Reader) {
 			binary.LittleEndian.PutUint32(rep[12:], uint32(len(rep)-iusbHeaderLen))
 			setIUSBChecksum(rep)
 		default:
+			if req[scsiCDBAt] >= opMediaPrivate {
+				// Other private opcodes, such as the 0xF3 the BMC sends about a minute in:
+				// JViewer answers them as an invalid command, whatever is in the drive.
+				rep = scsiReply(req, 1, 0x05, 0x20, 0, nil)
+				break
+			}
 			rep = t.execute(req)
 		}
 		_ = t.conn.SetWriteDeadline(time.Now().Add(writeTimeout))

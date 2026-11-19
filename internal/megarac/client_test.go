@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -53,7 +54,7 @@ type fakeBMCServer struct {
 	srv     *httptest.Server
 	mu      sync.Mutex
 	tunnels int
-	disc    []string
+	events  []string // media state and STOP_SESSION messages on the KVM tunnel
 	closing chan struct{}
 	media   chan *fakeMediaBMC // media tunnels, after their tunnel request
 }
@@ -127,20 +128,33 @@ func (f *fakeBMCServer) serve(c net.Conn) {
 	b.handshake(validationOK)
 	frames := readRecording(f.t)
 	b.frame(frames[0])
-	// Wait for the client to leave and record its disconnect line.
+	// Record the client's media state and STOP_SESSION messages until it leaves.
 	_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
 	for {
-		line, err := r.ReadString('\n')
+		m, err := readMessage(r)
 		if err != nil {
 			return
 		}
-		if strings.HasPrefix(line, "JVIEWER DISCONNECT") {
-			f.mu.Lock()
-			f.disc = append(f.disc, strings.TrimSpace(line))
-			f.mu.Unlock()
+		switch m.Type {
+		case typeMediaState:
+			f.event(fmt.Sprintf("media %d", m.Status))
+		case typeStopSession:
+			f.event("stop")
 			return
 		}
 	}
+}
+
+func (f *fakeBMCServer) event(e string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, e)
+}
+
+func (f *fakeBMCServer) eventLog() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.events...)
 }
 
 func TestClientConnectsThroughTheTunnel(t *testing.T) {
@@ -165,8 +179,8 @@ func TestClientConnectsThroughTheTunnel(t *testing.T) {
 	if f.tunnels != 1 {
 		t.Errorf("%d tunnels, want 1", f.tunnels)
 	}
-	if len(f.disc) != 1 || f.disc[0] != "JVIEWER DISCONNECT Cookie COOKIE123" {
-		t.Errorf("disconnects %q", f.disc)
+	if len(f.events) != 1 || f.events[0] != "stop" {
+		t.Errorf("KVM teardown %q, want STOP_SESSION", f.events)
 	}
 	if f.web.logouts != 1 {
 		t.Errorf("web logouts %d, want 1", f.web.logouts)
@@ -260,12 +274,18 @@ func TestClientMapsCDThroughATunnel(t *testing.T) {
 	if r := m.scsi([]byte{0x28, 0, 0, 0, 0, 1, 0, 0, 1, 0}, nil); r.status != 0 || !bytes.Equal(r.data, content2[2048:]) {
 		t.Errorf("READ of the second image: status %d, %d bytes", r.status, len(r.data))
 	}
+	// As JViewer leaves: media first, so MEDIA_STATE 0 goes out on the live KVM session, then
+	// STOP_SESSION.
+	c.CloseMedia()
+	_ = m.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := m.r.ReadByte(); err == nil {
+		t.Error("media tunnel still open after CloseMedia")
+	}
 	cancel()
 	loggedOut = true
 	c.Logout()
-	_ = m.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, err := m.r.ReadByte(); err == nil {
-		t.Error("media tunnel still open after Logout")
+	if got := strings.Join(f.eventLog(), ", "); got != "media 1, media 0, stop" {
+		t.Errorf("KVM messages %q, want media 1, media 0, stop", got)
 	}
 }
 

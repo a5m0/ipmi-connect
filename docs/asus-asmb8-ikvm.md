@@ -65,7 +65,9 @@ Requested over HTTPS, the JNLP launches `JViewer` with named arguments **(verifi
    CD and floppy)**.
 3. The BMC answers `HTTP/1.0 200 OK\r\n\r\n` **(verified)**; a reply containing `ERROR` names an
    error code. From then on the socket carries IVTP.
-4. To leave, send `JVIEWER DISCONNECT Cookie <webcookie>\r\n\r\n`.
+4. To leave, the viewer sends IVTP `STOP_SESSION` (8) with size and status 0; the BMC closes the
+   socket at once **(verified with JViewer)**. The viewer also has a
+   `JVIEWER DISCONNECT Cookie <webcookie>\r\n\r\n` line, but never sends it.
 
 ---
 
@@ -205,19 +207,34 @@ viewer's wire behaviour; offsets count from the start of the frame.
   status and sense at 53..56, data length at 57 and data from 61, at most 128 KiB. The host's
   first commands were TEST UNIT READY, READ TOC, READ CAPACITY and READ(10).
 - **Private opcodes**: `0xF6` (BMC) stops the drive; `0xF4` (BMC, hard disk only) asks for the
-  drive type, which the client appends as one byte after an empty reply.
+  drive type, which the client appends as one byte after an empty reply. About a minute after a
+  drive connects the BMC sends `0xF3`, with one data byte and device and protocol bytes 0; the
+  viewer answers CHECK CONDITION `05/20/00` (invalid command), with no data **(verified)**.
 - **Media state**: the client sends IVTP `MEDIA_STATE` (24) on the KVM channel, `status` 1 when
   its first drive connects and 0 when the last one closes. The BMC does not answer it.
-- There is no goodbye packet and no keepalive: the client closes the socket.
+- There is no goodbye packet and no client keepalive: the client closes the socket.
 
 **Busy drives (seen on the test board)**: after a drive's tunnel closes, cleanly or not, the
 BMC refuses that drive type (status 8) for about two minutes. It then stops answering the auth
 at all for a few more minutes; while an auth waits, the web interface stalls too. Sending
 `JVIEWER DISCONNECT` on the media tunnel before closing did not change this.
 
+**JViewer does the same (verified)**. A capture of the vendor viewer on the same board:
+
+- Disconnecting a drive closes its socket (no goodbye packet), then sends `MEDIA_STATE` 0.
+- Connecting the CD again, a minute later in the same KVM session, got no auth answer in eleven
+  minutes. The viewer has no timeout: its dialog stayed frozen until the socket was killed.
+- Exiting with a drive connected closes the media socket, sends `MEDIA_STATE` 0, then
+  `STOP_SESSION`, in that order.
+- After that exit and a new web login and KVM session, the CD connected at once, under three
+  minutes after the stalled tunnel closed. In this one run the busy state ended with the KVM
+  session rather than after a fixed time.
+- The viewer answers the second TEST UNIT READY after connecting with `06/28/00`.
+
 ipmi-connect therefore never closes a tunnel on eject. Each drive type's tunnel is opened on its
 first attach and kept until logout. While no image is in it, every SCSI command gets CHECK
 CONDITION `02/3A/00` (medium not present); when a new image goes in, the first command other
 than INQUIRY gets `06/28/00` (medium may have changed), after which the drive answers normally.
-Eject and re-attach are instant; only a re-attach after a logout or a dropped tunnel still
-waits out the busy period.
+At logout it leaves as the viewer does: media first, then `STOP_SESSION`. Eject and re-attach
+are instant; a drive whose tunnel drops mid-session stays busy until the busy period ends or the
+KVM session is replaced.

@@ -59,8 +59,3 @@ func firstLine(s string) string {
 	line, _, _ := strings.Cut(s, "\r\n")
 	return line
 }
-
-// disconnectLine ends the tunnelled session, as JViewer does when it closes.
-func disconnectLine(cookie string) string {
-	return "JVIEWER DISCONNECT Cookie " + cookie + "\r\n\r\n"
-}

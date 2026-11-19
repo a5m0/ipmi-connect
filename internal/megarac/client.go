@@ -213,14 +213,10 @@ func (c *Client) serveOnce(ctx context.Context, sink Sink) error {
 	return s.Run(ctx, sink)
 }
 
-// Logout ends the web session once the KVM session has closed. Cancel Start's context first.
+// Logout ends the web session once the KVM session has closed. Call CloseMedia, then cancel
+// Start's context, first; Logout closes the media too if that was skipped.
 func (c *Client) Logout() {
-	if c.Manager != nil {
-		c.Close() // eject every drive while the session token is still valid
-	}
-	if c.media != nil {
-		c.media.Close() // the tunnels outlive ejects; close them before the web logout
-	}
+	c.CloseMedia()
 	c.mu.Lock()
 	running := c.running
 	c.mu.Unlock()
@@ -291,4 +287,16 @@ func (c *Client) KeyboardLEDs() KeyboardLEDs {
 		return KeyboardLEDs{}
 	}
 	return s.KeyboardLEDs()
+}
+
+// CloseMedia ejects every drive and closes the media tunnels, which also sends MEDIA_STATE 0.
+// Call it before cancelling Start's context, so that goes out on the live KVM session, as
+// JViewer does when it exits.
+func (c *Client) CloseMedia() {
+	if c.Manager != nil {
+		c.Close() // eject every drive while the session token is still valid
+	}
+	if c.media != nil {
+		c.media.Close() // the tunnels outlive ejects; close them before the web logout
+	}
 }

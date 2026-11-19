@@ -62,9 +62,3 @@ func TestOpenTunnelRejectsCookieInjection(t *testing.T) {
 		t.Fatal("want an error for a cookie with line breaks")
 	}
 }
-
-func TestDisconnectLine(t *testing.T) {
-	if got := disconnectLine("C1"); got != "JVIEWER DISCONNECT Cookie C1\r\n\r\n" {
-		t.Errorf("disconnectLine = %q", got)
-	}
-}

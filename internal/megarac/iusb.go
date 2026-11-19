@@ -31,6 +31,7 @@ const (
 	opMediaAuthReply = 0xF1 // BMC: connection status at 62
 	opMediaSetHDType = 0xF4 // BMC, hard disk only: the client answers with its drive type
 	opMediaKill      = 0xF6 // BMC: another client took the drive, or the BMC stopped it
+	opMediaPrivate   = 0xF0 // opcodes from here up are the protocol's own, not SCSI
 
 	mediaAuthLen     = 160 // session token type 0
 	mediaAuthTokenAt = 63
