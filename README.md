@@ -58,7 +58,7 @@ It has been tested on the three boards I own (the ASUS module is newer to the pr
 | Mouse | Works | Works (absolute position and buttons verified on hardware) | Implemented (absolute), not yet tested on hardware |
 | Macros (Ctrl+Alt+Del, F-keys…) | Works | Implemented | Implemented |
 | Power control | Works | Status verified; commands over the KVM socket or `ipmi.cgi` | Status verified; commands over the KVM tunnel, not yet tested on hardware |
-| Virtual media | Works: ISO on CD/DVD (booted an installer), IMG on removable or floppy (read-write), Create Image, transfer graph, USB reset | Works: ISO on CD, IMG on removable or floppy (read-write), Create Image (blank or from a folder), all verified byte-exact on hardware; one drive at a time, see known issues | Experimental: ISO on CD and IMG on floppy read by the host on hardware; removable untested; after an eject the BMC keeps the drive busy for minutes |
+| Virtual media | Works: ISO on CD/DVD (booted an installer), IMG on removable or floppy (read-write), Create Image, transfer graph, USB reset | Works: ISO on CD, IMG on removable or floppy (read-write), Create Image (blank or from a folder), all verified byte-exact on hardware; one drive at a time, see known issues | Experimental: ISO on CD and IMG on floppy read by the host on hardware; removable untested; eject and re-attach are instant, but after a logout the BMC keeps each drive busy for minutes |
 
 **ASUS ASMB8-iKVM (experimental).** This module runs AMI MegaRAC SP on an ASPEED AST2400, with
 the KVM tunnelled through the web server's TLS port (`--type megarac`, or auto detection). Login,
@@ -355,7 +355,7 @@ test/e2e/              Browser test against a scripted fake BMC session
 ## Known issues
 
 - Supermicro: while the BMC's own web-UI media mount is active, it has one free virtual media slot, so a second drive is refused with "slots are full or busy".
-- ASUS ASMB8 (MegaRAC): after a virtual media drive is ejected or its connection drops, the BMC keeps that drive busy for several minutes, and while a new attach waits for it the BMC's web interface stalls too. Wait a few minutes before attaching the same drive type again. USB reset is not available.
+- ASUS ASMB8 (MegaRAC): when a virtual media drive's connection closes (at logout, or if it drops), the BMC keeps that drive busy for several minutes, and while a new attach waits for it the BMC's web interface stalls too. ipmi-connect keeps each drive's connection open across ejects, so swapping images is instant; after a logout or a dropped connection, wait a few minutes before attaching that drive type again. USB reset is not available.
 - `--port` is accepted for compatibility but ignored.
 - Desktop mode starts a new instance each time it is launched; a second launch does not reuse the first.
 

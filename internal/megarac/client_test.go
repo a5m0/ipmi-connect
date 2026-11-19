@@ -188,7 +188,13 @@ func TestClientMapsCDThroughATunnel(t *testing.T) {
 	}
 	sink := &recordingSink{}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer func() { cancel(); c.Logout() }()
+	loggedOut := false
+	defer func() {
+		if !loggedOut {
+			cancel()
+			c.Logout()
+		}
+	}()
 	c.Start(ctx, sink)
 	waitFor(t, "a frame through the tunnel", func() bool { n, _, _, _ := sink.snapshot(); return n > 0 })
 
@@ -231,9 +237,35 @@ func TestClientMapsCDThroughATunnel(t *testing.T) {
 	if err := c.UnmapDrive(bmc.TargetCD); err != nil {
 		t.Fatal(err)
 	}
+	// The tunnel stays up with an empty drive, and the next image goes over it.
+	sense(t, "TEST UNIT READY after eject", m.scsi([]byte{0x00, 0, 0, 0, 0, 0}, nil), 1, 0x02, 0x3A, 0)
+	iso2 := filepath.Join(t.TempDir(), "second.iso")
+	content2 := bytes.Repeat([]byte{0xC3}, 2*2048)
+	if err := os.WriteFile(iso2, content2, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	im2, err := c.AddImage(iso2, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.MapImage(im2.ID, bmc.TargetCD); err != nil {
+		t.Fatalf("MapImage after eject: %v", err)
+	}
+	select {
+	case <-f.media:
+		t.Fatal("a second media tunnel was opened")
+	default:
+	}
+	sense(t, "TEST UNIT READY after the swap", m.scsi([]byte{0x00, 0, 0, 0, 0, 0}, nil), 1, 0x06, 0x28, 0)
+	if r := m.scsi([]byte{0x28, 0, 0, 0, 0, 1, 0, 0, 1, 0}, nil); r.status != 0 || !bytes.Equal(r.data, content2[2048:]) {
+		t.Errorf("READ of the second image: status %d, %d bytes", r.status, len(r.data))
+	}
+	cancel()
+	loggedOut = true
+	c.Logout()
 	_ = m.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	if _, err := m.r.ReadByte(); err == nil {
-		t.Error("media tunnel still open after UnmapDrive")
+		t.Error("media tunnel still open after Logout")
 	}
 }
 

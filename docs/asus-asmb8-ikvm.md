@@ -213,6 +213,11 @@ viewer's wire behaviour; offsets count from the start of the frame.
 **Busy drives (seen on the test board)**: after a drive's tunnel closes, cleanly or not, the
 BMC refuses that drive type (status 8) for about two minutes. It then stops answering the auth
 at all for a few more minutes; while an auth waits, the web interface stalls too. Sending
-`JVIEWER DISCONNECT` on the media tunnel before closing did not change this. Ejecting and
-mapping again straight away therefore fails; ipmi-connect says to retry later. A removable
-(`HDMEDIA`) drive could not be tested for this reason.
+`JVIEWER DISCONNECT` on the media tunnel before closing did not change this.
+
+ipmi-connect therefore never closes a tunnel on eject. Each drive type's tunnel is opened on its
+first attach and kept until logout. While no image is in it, every SCSI command gets CHECK
+CONDITION `02/3A/00` (medium not present); when a new image goes in, the first command other
+than INQUIRY gets `06/28/00` (medium may have changed), after which the drive answers normally.
+Eject and re-attach are instant; only a re-attach after a logout or a dropped tunnel still
+waits out the busy period.

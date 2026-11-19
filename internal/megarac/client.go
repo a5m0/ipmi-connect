@@ -35,40 +35,53 @@ type Client struct {
 	running  bool
 	stopped  chan struct{} // closed when Run returns
 
-	// Manager provides virtual media (bmc.VirtualMedia) over IUSB tunnels, one per drive.
+	// Manager provides virtual media (bmc.VirtualMedia) over media's IUSB tunnels, one per
+	// drive type, which stay open across ejects until Logout.
 	*vmedia.Manager
+	media *mediaPool
 }
 
 // NewClient prepares a client for the BMC at ep; call Login, then Start. Every connection goes
 // through ep.
 func NewClient(ep *bmc.Endpoint, user, password string) *Client {
 	c := &Client{ep: ep, user: user, web: NewWeb(ep, user, password), stopped: make(chan struct{})}
+	c.media = newMediaPool(c.dialMedia, c.setMediaState)
 	c.Manager = vmedia.NewManager(c.openVMedia)
 	return c
 }
 
-// openVMedia starts virtual media on the current KVM session: its drives are tunnelled through
-// the web port like the KVM and authenticated with the same session token.
+// openVMedia starts virtual media on the current KVM session.
 func (c *Client) openVMedia(context.Context) (vmedia.Session, error) {
+	if _, err := c.current(); err != nil {
+		return nil, fmt.Errorf("virtual media needs the KVM session: %w", err)
+	}
+	return c.media.view(), nil
+}
+
+// dialMedia opens a drive's tunnel: it goes through the web port like the KVM and is
+// authenticated with the current KVM session's token.
+func (c *Client) dialMedia(ctx context.Context, service string) (net.Conn, string, error) {
 	s, err := c.current()
 	if err != nil {
-		return nil, fmt.Errorf("virtual media needs the KVM session: %w", err)
+		return nil, "", fmt.Errorf("virtual media needs the KVM session: %w", err)
 	}
 	c.mu.Lock()
 	webPort := c.tunnelAt
 	c.mu.Unlock()
-	cred := s.cred
-	dial := func(ctx context.Context, service string) (net.Conn, error) {
-		return c.tunnel(ctx, webPort, cred.webCookie, service)
+	conn, err := c.tunnel(ctx, webPort, s.cred.webCookie, service)
+	if err != nil {
+		return nil, "", err
 	}
-	state := func(on bool) {
-		if s, err := c.current(); err == nil {
-			if err := s.SetMediaState(on); err != nil {
-				log.Printf("[MegaRAC] Media state: %v", err)
-			}
+	return conn, s.cred.kvmToken, nil
+}
+
+// setMediaState reports media redirection starting or stopping on the current KVM session.
+func (c *Client) setMediaState(on bool) {
+	if s, err := c.current(); err == nil {
+		if err := s.SetMediaState(on); err != nil {
+			log.Printf("[MegaRAC] Media state: %v", err)
 		}
 	}
-	return newMediaSession(dial, cred.kvmToken, state), nil
 }
 
 // tunnel opens a TLS connection to the web port and asks it to carry service.
@@ -204,6 +217,9 @@ func (c *Client) serveOnce(ctx context.Context, sink Sink) error {
 func (c *Client) Logout() {
 	if c.Manager != nil {
 		c.Close() // eject every drive while the session token is still valid
+	}
+	if c.media != nil {
+		c.media.Close() // the tunnels outlive ejects; close them before the web logout
 	}
 	c.mu.Lock()
 	running := c.running

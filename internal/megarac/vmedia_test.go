@@ -7,11 +7,15 @@ import (
 	"encoding/binary"
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/a5m0/ipmi-connect/internal/bmc"
 	"github.com/a5m0/ipmi-connect/internal/vmedia"
 )
 
@@ -118,22 +122,71 @@ func (f *fakeMediaBMC) scsi(cdb []byte, data []byte) scsiResult {
 
 type mediaHarness struct {
 	t       *testing.T
-	sess    *mediaSession
+	pool    *mediaPool
+	sess    *mediaSession // a view on pool, as the Manager gets it
 	tunnels chan *fakeMediaBMC
 	states  chan bool
+	dials   atomic.Int32
 }
 
 func newMediaHarness(t *testing.T) *mediaHarness {
 	h := &mediaHarness{t: t, tunnels: make(chan *fakeMediaBMC, 4), states: make(chan bool, 8)}
-	dial := func(_ context.Context, service string) (net.Conn, error) {
+	dial := func(_ context.Context, service string) (net.Conn, string, error) {
+		h.dials.Add(1)
 		client, server := net.Pipe()
 		t.Cleanup(func() { client.Close(); server.Close() })
 		h.tunnels <- &fakeMediaBMC{t: t, service: service, conn: server, r: bufio.NewReader(server)}
-		return client, nil
+		return client, "KVMTOKEN0123456", nil
 	}
-	h.sess = newMediaSession(dial, "KVMTOKEN0123456", func(on bool) { h.states <- on })
-	t.Cleanup(func() { _ = h.sess.Close() })
+	h.pool = newMediaPool(dial, func(on bool) { h.states <- on })
+	h.sess = h.pool.view()
+	t.Cleanup(func() { _ = h.sess.Close(); h.pool.Close() })
 	return h
+}
+
+// noState checks that no media state was sent.
+func (h *mediaHarness) noState() {
+	h.t.Helper()
+	select {
+	case on := <-h.states:
+		h.t.Errorf("unexpected media state %v", on)
+	default:
+	}
+}
+
+// mapParked maps image onto a parked tunnel, which must not dial.
+func (h *mediaHarness) mapParked(img vmedia.Image, o vmedia.MapOptions) uint16 {
+	h.t.Helper()
+	disk, err := h.sess.Map(context.Background(), img, o)
+	if err != nil {
+		h.t.Fatalf("Map onto a parked tunnel: %v", err)
+	}
+	select {
+	case <-h.tunnels:
+		h.t.Fatal("Map dialled a new tunnel instead of reusing the parked one")
+	default:
+	}
+	return disk
+}
+
+// diskOf returns the disk number the view reports for target.
+func (h *mediaHarness) diskOf(target vmedia.Target) uint16 {
+	h.t.Helper()
+	for _, d := range h.sess.Drives() {
+		if d.Target == target {
+			return d.Disk
+		}
+	}
+	h.t.Fatalf("no %s drive in %+v", target, h.sess.Drives())
+	return 0
+}
+
+// sense checks a reply's status and sense.
+func sense(t *testing.T, what string, r scsiResult, status, key, asc, ascq byte) {
+	t.Helper()
+	if r.status != status || r.key != key || r.asc != asc || r.ascq != ascq {
+		t.Errorf("%s: status %d sense %02x/%02x/%02x, want %d %02x/%02x/%02x", what, r.status, r.key, r.asc, r.ascq, status, key, asc, ascq)
+	}
 }
 
 // mapAsync maps image and returns the BMC end of its tunnel and the Map result.
@@ -325,38 +378,28 @@ func TestMediaHardDiskTypeQuery(t *testing.T) {
 
 func TestMediaUnmapAndClose(t *testing.T) {
 	h := newMediaHarness(t)
-	cd := h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
+	h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
 	h.state(true)
 	h.mapOK(patternImage(64*512), vmedia.MapOptions{Target: vmedia.TargetRemovable, Size: 64 * 512})
 	if _, err := h.sess.Map(context.Background(), patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048}); err == nil {
 		t.Error("a second CD was mapped")
 	}
-	drives := h.sess.Drives()
-	if len(drives) != 2 {
+	if drives := h.sess.Drives(); len(drives) != 2 {
 		t.Fatalf("drives %+v", drives)
 	}
-	var cdDisk uint16
-	for _, d := range drives {
-		if d.Target == vmedia.TargetCD {
-			cdDisk = d.Disk
-		}
-	}
+	cdDisk := h.diskOf(vmedia.TargetCD)
 	if err := h.sess.Unmap(cdDisk); err != nil {
 		t.Fatal(err)
 	}
-	_ = cd.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, err := cd.r.ReadByte(); err == nil {
-		t.Error("CD tunnel still open after Unmap")
+	if err := h.sess.Unmap(cdDisk); err == nil {
+		t.Error("a second Unmap of the same disk succeeded")
 	}
-	select {
-	case on := <-h.states:
-		t.Errorf("media state %v sent while a drive is still mapped", on)
-	default:
+	if d := h.sess.Drives(); len(d) != 1 || d[0].Target != vmedia.TargetRemovable {
+		t.Errorf("drives after the CD eject %+v", d)
 	}
 	if err := h.sess.Close(); err != nil {
 		t.Fatal(err)
 	}
-	h.state(false)
 	select {
 	case <-h.sess.Done():
 	case <-time.After(5 * time.Second):
@@ -364,6 +407,146 @@ func TestMediaUnmapAndClose(t *testing.T) {
 	}
 	if h.sess.Err() != nil {
 		t.Errorf("Err after Close = %v", h.sess.Err())
+	}
+	h.noState()
+}
+
+func TestMediaEjectKeepsTunnel(t *testing.T) {
+	h := newMediaHarness(t)
+	f := h.mapOK(patternImage(4*2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 4 * 2048})
+	h.state(true)
+	if err := h.sess.Unmap(h.diskOf(vmedia.TargetCD)); err != nil {
+		t.Fatal(err)
+	}
+	// The tunnel stays up and reports an empty drive.
+	sense(t, "TEST UNIT READY after eject", f.scsi([]byte{0x00, 0, 0, 0, 0, 0}, nil), 1, 0x02, 0x3A, 0)
+	r := f.scsi([]byte{0x28, 0, 0, 0, 0, 0, 0, 0, 1, 0}, nil)
+	sense(t, "READ after eject", r, 1, 0x02, 0x3A, 0)
+	if len(r.data) != 0 {
+		t.Errorf("READ after eject returned %d bytes", len(r.data))
+	}
+	if len(h.sess.Drives()) != 0 {
+		t.Errorf("drives after eject %+v", h.sess.Drives())
+	}
+	h.noState()
+}
+
+func TestMediaRemapReusesTunnel(t *testing.T) {
+	h := newMediaHarness(t)
+	f := h.mapOK(patternImage(4*2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 4 * 2048})
+	h.state(true)
+	if err := h.sess.Unmap(h.diskOf(vmedia.TargetCD)); err != nil {
+		t.Fatal(err)
+	}
+	second := &memImage{data: bytes.Repeat([]byte{0x5A}, 2*2048)}
+	h.mapParked(second, vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2 * 2048})
+	sense(t, "first TEST UNIT READY after the swap", f.scsi([]byte{0x00, 0, 0, 0, 0, 0}, nil), 1, 0x06, 0x28, 0)
+	sense(t, "second TEST UNIT READY", f.scsi([]byte{0x00, 0, 0, 0, 0, 0}, nil), 0, 0, 0, 0)
+	r := f.scsi([]byte{0x28, 0, 0, 0, 0, 1, 0, 0, 1, 0}, nil)
+	if r.status != 0 || !bytes.Equal(r.data, second.bytes(2048, 2048)) {
+		t.Errorf("READ of the new image: status %d, %d bytes", r.status, len(r.data))
+	}
+	if n := h.dials.Load(); n != 1 {
+		t.Errorf("%d dials, want 1", n)
+	}
+	h.noState()
+}
+
+func TestMediaViewCloseKeepsTunnelPoolCloseEndsIt(t *testing.T) {
+	h := newMediaHarness(t)
+	f := h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
+	h.state(true)
+	if err := h.sess.Close(); err != nil {
+		t.Fatal(err)
+	}
+	<-h.sess.Done()
+	sense(t, "TEST UNIT READY after the view closed", f.scsi([]byte{0x00, 0, 0, 0, 0, 0}, nil), 1, 0x02, 0x3A, 0)
+	h.noState()
+
+	// A new view reuses the parked tunnel.
+	h.sess = h.pool.view()
+	h.mapParked(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
+
+	h.pool.Close()
+	_ = f.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := f.r.ReadByte(); err == nil {
+		t.Error("tunnel still open after the pool closed")
+	}
+	h.state(false)
+	select {
+	case <-h.sess.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("closing the pool did not end the view")
+	}
+	if _, err := h.sess.Map(context.Background(), patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetFloppy, Size: 2048}); err == nil {
+		t.Error("Map after the pool closed succeeded")
+	}
+}
+
+func TestMediaParkedTunnelLossRedials(t *testing.T) {
+	h := newMediaHarness(t)
+	f := h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
+	h.state(true)
+	if err := h.sess.Unmap(h.diskOf(vmedia.TargetCD)); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.conn.Close()
+	h.state(false) // the last tunnel closed
+	select {
+	case <-h.sess.Done():
+		t.Fatal("losing a parked tunnel ended the view")
+	default:
+	}
+	g := h.mapOK(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
+	h.state(true)
+	sense(t, "TEST UNIT READY on the new tunnel", g.scsi([]byte{0x00, 0, 0, 0, 0, 0}, nil), 0, 0, 0, 0)
+	if n := h.dials.Load(); n != 2 {
+		t.Errorf("%d dials, want 2", n)
+	}
+}
+
+func TestMediaManagerRemapDialsOnce(t *testing.T) {
+	h := newMediaHarness(t)
+	m := vmedia.NewManager(func(context.Context) (vmedia.Session, error) { return h.pool.view(), nil })
+	t.Cleanup(m.Close)
+	dir := t.TempDir()
+	var ids []string
+	for i, name := range []string{"one.iso", "two.iso"} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, bytes.Repeat([]byte{byte(i + 1)}, 4*2048), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		im, err := m.AddImage(path, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, im.ID)
+	}
+	mapped := make(chan error, 1)
+	go func() { mapped <- m.MapImage(ids[0], bmc.TargetCD) }()
+	var f *fakeMediaBMC
+	select {
+	case f = <-h.tunnels:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no tunnel dialled")
+	}
+	f.accept(1)
+	if err := <-mapped; err != nil {
+		t.Fatal(err)
+	}
+	if err := m.UnmapDrive(bmc.TargetCD); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.MapImage(ids[1], bmc.TargetCD); err != nil {
+		t.Fatalf("MapImage after eject: %v", err)
+	}
+	if n := h.dials.Load(); n != 1 {
+		t.Errorf("%d dials, want 1", n)
+	}
+	sense(t, "TEST UNIT READY after the swap", f.scsi([]byte{0x00, 0, 0, 0, 0, 0}, nil), 1, 0x06, 0x28, 0)
+	r := f.scsi([]byte{0x28, 0, 0, 0, 0, 0, 0, 0, 1, 0}, nil)
+	if r.status != 0 || !bytes.Equal(r.data, bytes.Repeat([]byte{2}, 2048)) {
+		t.Errorf("READ of the second image: status %d, %d bytes", r.status, len(r.data))
 	}
 }
 
