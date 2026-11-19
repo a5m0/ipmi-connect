@@ -209,7 +209,7 @@ func TestMediaServicesAndAuth(t *testing.T) {
 }
 
 func TestMediaAuthRefused(t *testing.T) {
-	for status, want := range map[byte]string{5: "privilege", 8: "maximum", 3: "198.51.100.7"} {
+	for status, want := range map[byte]string{5: "privilege", 8: "a few minutes", 3: "198.51.100.7"} {
 		h := newMediaHarness(t)
 		f, res := h.mapAsync(patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
 		f.accept(status)
@@ -220,6 +220,20 @@ func TestMediaAuthRefused(t *testing.T) {
 		if len(h.sess.Drives()) != 0 {
 			t.Errorf("status %d: a refused drive is listed", status)
 		}
+	}
+}
+
+func TestMediaAuthUnanswered(t *testing.T) {
+	h := newMediaHarness(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	go func() {
+		f := <-h.tunnels
+		f.read() // the auth packet, never answered
+	}()
+	_, err := h.sess.Map(ctx, patternImage(2048), vmedia.MapOptions{Target: vmedia.TargetCD, Size: 2048})
+	if err == nil || !strings.Contains(err.Error(), "a few minutes") {
+		t.Errorf("unanswered auth: %v, want a hint to retry in a few minutes", err)
 	}
 }
 

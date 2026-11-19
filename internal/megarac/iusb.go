@@ -57,7 +57,8 @@ func readIUSB(r io.Reader) ([]byte, error) {
 		}
 		return nil, err
 	}
-	if string(h[:8]) != iusbSignature || h[10] != iusbHeaderLen {
+	// Only the signature is checked: the BMC leaves the version and header length (8..10) zero.
+	if string(h[:8]) != iusbSignature {
 		return nil, fmt.Errorf("not an IUSB frame (header % x)", h[:11])
 	}
 	n := binary.LittleEndian.Uint32(h[12:])

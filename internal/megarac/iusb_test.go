@@ -44,12 +44,10 @@ func TestReadIUSBRejectsBadFrames(t *testing.T) {
 	good := scsiRequest(1, []byte{0x00}, nil)
 	badSig := append([]byte(nil), good...)
 	copy(badSig, "IVTP    ")
-	badHdrLen := append([]byte(nil), good...)
-	badHdrLen[10] = 16
 	huge := append([]byte(nil), good[:iusbHeaderLen]...)
 	binary.LittleEndian.PutUint32(huge[12:], maxIUSBFrame)
 	for name, b := range map[string][]byte{
-		"signature": badSig, "header length": badHdrLen, "oversize": huge,
+		"signature": badSig, "oversize": huge,
 		"truncated header": good[:10], "truncated body": good[:40],
 	} {
 		if _, err := readIUSB(bytes.NewReader(b)); err == nil {
@@ -58,6 +56,15 @@ func TestReadIUSBRejectsBadFrames(t *testing.T) {
 	}
 	if _, err := readIUSB(bytes.NewReader(nil)); !errors.Is(err, io.EOF) {
 		t.Errorf("empty stream: %v, want EOF", err)
+	}
+}
+
+// The ASMB8 leaves the version and header length bytes zero in what it sends (seen on hardware).
+func TestReadIUSBAcceptsZeroVersionAndHeaderLength(t *testing.T) {
+	frame := scsiRequest(1, []byte{0x00}, nil)
+	frame[8], frame[9], frame[10] = 0, 0, 0
+	if _, err := readIUSB(bytes.NewReader(frame)); err != nil {
+		t.Errorf("readIUSB: %v", err)
 	}
 }
 

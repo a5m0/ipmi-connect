@@ -19,6 +19,10 @@ import (
 // mediaAuthTimeout bounds the tunnel's auth exchange.
 const mediaAuthTimeout = 10 * time.Second
 
+// mediaBusyHint explains the BMC's habit, seen on the ASMB8, of keeping a drive's slot for a few
+// minutes after its tunnel closes.
+const mediaBusyHint = "the BMC keeps a drive busy for a few minutes after it is ejected or its connection drops; try again shortly"
+
 var errMediaUSBReset = errors.New("USB reset is not supported on MegaRAC; eject and map the image again")
 
 // mediaDialer opens a TLS tunnel through the BMC's web port that carries service.
@@ -141,7 +145,7 @@ func (s *mediaSession) authenticate(ctx context.Context, conn net.Conn, r *bufio
 	}
 	rep, err := readIUSB(r)
 	if err != nil {
-		return fmt.Errorf("waiting for the BMC to accept the drive: %w", err)
+		return fmt.Errorf("the BMC did not accept the drive (%w); %s", err, mediaBusyHint)
 	}
 	if len(rep) <= mediaAuthStatAt || rep[scsiCDBAt] != opMediaAuthReply {
 		return fmt.Errorf("unexpected first packet from the BMC (%d bytes)", len(rep))
@@ -152,7 +156,7 @@ func (s *mediaSession) authenticate(ctx context.Context, conn net.Conn, r *bufio
 	case 5:
 		return errors.New("the user has no virtual media privilege")
 	case 8:
-		return errors.New("the BMC has reached its maximum number of virtual media sessions")
+		return errors.New("the BMC has no free session for this drive: " + mediaBusyHint)
 	default:
 		other := ""
 		if len(rep) > mediaAuthStatAt+1 {
