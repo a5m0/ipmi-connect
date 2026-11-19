@@ -16,7 +16,7 @@ Use a test server whose host OS you can lose, on a management network.
 
 - [ ] First connection shows a certificate dialog; its SHA-256 matches the one noted above.
 - [ ] Obsolete TLS is reported (expected: TLS 1.0, `TLS_RSA_WITH_AES_256_CBC_SHA` on the
-      Supermicro; TLS 1.2, `TLS_RSA_WITH_AES_256_GCM_SHA384` (not CBC) on the ASUS ASMB8;
+      Supermicro; TLS 1.2, `TLS_RSA_WITH_AES_128_GCM_SHA256` (GCM, not CBC; verified) on the ASUS ASMB8;
       Dell's web server negotiates a suite Go supports, record which).
 - [ ] After consent, a second connection asks nothing; the trust list shows the device.
 - [ ] "Forget" makes the next connection ask again.
