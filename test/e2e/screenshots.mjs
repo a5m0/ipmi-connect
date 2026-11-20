@@ -2,10 +2,10 @@
 // security details from test/e2e/fakeapp in documentation mode (no real BMC is contacted; the
 // address is in the 192.0.2.0/24 documentation range). Run: node test/e2e/screenshots.mjs
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 
 const require = createRequire(import.meta.url);
@@ -63,5 +63,9 @@ try {
   console.log('wrote docs/images/connection-manager.png, consent.png, security.png');
 } finally {
   await browser.close();
+  // Remove the temporary build once fakeapp has exited (kill alone leaves the folder behind).
+  const exited = new Promise((resolve) => app.on('exit', resolve));
   app.kill('SIGINT');
+  await exited;
+  rmSync(dirname(bin), { recursive: true, force: true });
 }

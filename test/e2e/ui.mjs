@@ -12,9 +12,9 @@ function fail(msg) { console.error(`FAIL: ${msg}`); process.exitCode = 1; throw 
 function ok(msg) { console.log(`ok: ${msg}`); }
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const bin = join(mkdtempSync(join(tmpdir(), 'ipmi-e2e-')), 'fakeapp');
 execFileSync('go', ['build', '-o', bin, './test/e2e/fakeapp'], { stdio: 'inherit' });
@@ -179,5 +179,9 @@ try {
   if (process.env.SCREENSHOT) await page.screenshot({ path: process.env.SCREENSHOT });
 } finally {
   await browser.close();
+  // Remove the temporary build once fakeapp has exited (kill alone leaves the folder behind).
+  const exited = new Promise((resolve) => app.on('exit', resolve));
   app.kill('SIGINT');
+  await exited;
+  rmSync(dirname(bin), { recursive: true, force: true });
 }
