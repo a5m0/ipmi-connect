@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/a5m0/ipmi-connect/internal/bmc"
 )
@@ -262,5 +263,22 @@ func TestScreenshotSaveWithoutDialog(t *testing.T) {
 	h.ServeHTTP(rec, authed(srv, httptest.NewRequest(http.MethodGet, "/api/screenshot/save", nil)))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET status %d, want 405", rec.Code)
+	}
+}
+
+func TestSetPingReportsInStatusAndDetachClearsIt(t *testing.T) {
+	srv, h, _ := newGuardedServer(t)
+	srv.SetPing(12345 * time.Microsecond)
+	status := func() string {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, authed(srv, httptest.NewRequest(http.MethodGet, "/api/status", nil)))
+		return rec.Body.String()
+	}
+	if s := status(); !strings.Contains(s, `"ping_ms":12.3`) {
+		t.Errorf("status %s lacks ping_ms 12.3", s)
+	}
+	srv.Detach()
+	if s := status(); strings.Contains(s, `"ping_ms"`) {
+		t.Errorf("status %s still reports a ping after Detach", s)
 	}
 }

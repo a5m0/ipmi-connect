@@ -40,6 +40,8 @@ type Live struct {
 	Stop func()
 	// Channels describes the security of each channel.
 	Channels func() []bmc.ChannelSecurity
+
+	stopPing func() // set by the Manager while connected
 }
 
 const (

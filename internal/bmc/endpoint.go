@@ -185,6 +185,19 @@ func (e *Endpoint) DialPort(ctx context.Context, port int) (net.Conn, error) {
 	return d.DialContext(ctx, "tcp", netip.AddrPortFrom(e.addr, uint16(port)).String())
 }
 
+// Ping times a TCP connect to the BMC's web port: one SYN/SYN-ACK round trip. Nothing is sent
+// on the connection, so it costs the BMC no login or TLS handshake.
+func (e *Endpoint) Ping(ctx context.Context) (time.Duration, error) {
+	start := time.Now()
+	conn, err := e.DialPort(ctx, e.HTTPSPort)
+	if err != nil {
+		return 0, err
+	}
+	rtt := time.Since(start)
+	_ = conn.Close()
+	return rtt, nil
+}
+
 // DialContext is a net.Dialer-style function for http.Transport: it accepts only this BMC's
 // host (or its resolved address) and allowed ports, and always dials the resolved address.
 func (e *Endpoint) DialContext(ctx context.Context, network, address string) (net.Conn, error) {

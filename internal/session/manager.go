@@ -36,6 +36,12 @@ const (
 // in flight times out after about ten seconds per request).
 const disconnectWait = 30 * time.Second
 
+// pingEvery and pingTimeout pace the round-trip measurement shown in the stats bar.
+const (
+	pingEvery   = 5 * time.Second
+	pingTimeout = 5 * time.Second
+)
+
 // ErrBusy is returned while another connect or disconnect is in progress.
 var ErrBusy = errors.New("a connection attempt is already in progress")
 
@@ -46,6 +52,8 @@ type Display interface {
 	SetStatus(text string)
 	SetFPS(fps int)
 	SetPower(state string)
+	// SetPing records the round trip to the BMC; 0 means unknown.
+	SetPing(rtt time.Duration)
 	// Attach makes console the target of browser input and records the session's description.
 	Attach(console bmc.Console, state bmc.SessionState)
 	// Detach stops browser input to the console, waits until every browser's held keys and
@@ -148,6 +156,8 @@ type Manager struct {
 	ep      *bmc.Endpoint
 	vendor  *Vendor
 	lastErr string
+
+	pingEvery time.Duration // how often a connected BMC's round trip is measured
 }
 
 // NewManager returns an idle manager.
@@ -159,7 +169,7 @@ func NewManager(opts Options) *Manager {
 	if vendors == nil {
 		vendors = builtinVendors()
 	}
-	return &Manager{opts: opts, vendors: vendors, phase: PhaseIdle}
+	return &Manager{opts: opts, vendors: vendors, phase: PhaseIdle, pingEvery: pingEvery}
 }
 
 // Status reports the current phase and connection security.
@@ -225,6 +235,7 @@ func (m *Manager) Connect(ctx context.Context, req Request) (Status, error) {
 		Host: ep.Host, TargetType: bmc.TargetType(vendor.Name), Model: live.Model, Firmware: live.Firmware,
 		Connected: true, Authenticated: true, PowerState: bmc.PowerStateUnknown,
 	})
+	live.stopPing = m.startPing(ep)
 	if m.opts.Profiles != nil {
 		if err := m.opts.Profiles.AddRecent(req.Address, req.User, vendor.Name); err != nil {
 			log.Printf("[Session] Could not record the recent device: %v", err)
@@ -271,9 +282,42 @@ func (m *Manager) Disconnect() {
 }
 
 func (m *Manager) teardown(live *Live) {
+	if live.stopPing != nil {
+		live.stopPing()
+	}
 	m.opts.Display.Detach()
 	live.Stop()
 	log.Printf("[Session] Disconnected from %s", live.Host)
+}
+
+// startPing measures the round trip to the BMC every pingEvery until the returned stop is
+// called; stop returns once no further report can reach the display.
+func (m *Manager) startPing(ep *bmc.Endpoint) (stop func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		t := time.NewTicker(m.pingEvery)
+		defer t.Stop()
+		for {
+			pctx, pcancel := context.WithTimeout(ctx, pingTimeout)
+			rtt, err := ep.Ping(pctx)
+			pcancel()
+			if ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				rtt = 0 // unknown: the stats bar shows "--"
+			}
+			m.opts.Display.SetPing(rtt)
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+		}
+	}()
+	return func() { cancel(); <-done }
 }
 
 // connect runs the trust gate and then the vendor's login.

@@ -168,3 +168,17 @@ func TestEndpointAuthority(t *testing.T) {
 		}
 	}
 }
+
+func TestEndpointPingTimesAConnectToTheWebPort(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	ep := testEndpoint(t, srv)
+	rtt, err := ep.Ping(context.Background())
+	if err != nil || rtt <= 0 {
+		t.Fatalf("Ping = %v, %v; want a positive round trip", rtt, err)
+	}
+	srv.Close()
+	if _, err := ep.Ping(context.Background()); err == nil {
+		t.Error("Ping succeeded with nothing listening")
+	}
+}

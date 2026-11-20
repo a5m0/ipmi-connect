@@ -1,5 +1,10 @@
 package web
 
+import (
+	"math"
+	"time"
+)
+
 // SetScreenSize records the host's current video mode so /api/status and newly connected
 // browsers see the real resolution.
 func (s *Server) SetScreenSize(width, height int) {
@@ -15,6 +20,13 @@ func (s *Server) SetFPS(fps int) {
 	s.StateMu.Lock()
 	defer s.StateMu.Unlock()
 	s.State.FPS = fps
+}
+
+// SetPing records the round trip to the BMC (0: unknown) for /api/status, rounded to 0.1 ms.
+func (s *Server) SetPing(rtt time.Duration) {
+	s.StateMu.Lock()
+	defer s.StateMu.Unlock()
+	s.State.PingMS = math.Round(float64(rtt.Microseconds())/100) / 10
 }
 
 // SetStatus records a console status message ("No video signal", "View only", ...) for

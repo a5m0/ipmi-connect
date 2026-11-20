@@ -193,6 +193,8 @@ import { setupView } from '/view.js';
       // The server decodes the stream, so it reports the BMC's frame rate; the browser only sees
       // changes.
       statFPS.textContent = `FPS: ${data.fps || 0}`;
+      // Round trip to the BMC (a TCP connect to its web port), measured by the server.
+      statLatency.textContent = data.ping_ms ? `Ping: ${data.ping_ms < 10 ? data.ping_ms.toFixed(1) : Math.round(data.ping_ms)} ms` : 'Ping: -- ms';
       showPower(data.power_state);
       // Console notices such as "No video signal" or "View only"; empty when all is well.
       const notice = document.getElementById('statNotice');
@@ -308,10 +310,6 @@ import { setupView } from '/view.js';
       sessionEnded = true; // the BMC was disconnected or the browser signed out: do not reconnect
     } else if (msg.type === 'typed') {
       paste.onResult(msg);
-    } else if (msg.type === 'ping') {
-      const now = performance.now();
-      const rtt = Math.round(now - msg.client_time);
-      statLatency.textContent = `Ping: ${rtt} ms`;
     }
   }
 
