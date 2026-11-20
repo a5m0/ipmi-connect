@@ -13,7 +13,7 @@ type options struct {
 	Host        string
 	User        string // empty means IPMI_CONNECT_USER, else root
 	Password    string // empty means IPMI_CONNECT_PASSWORD, else prompt
-	Type        string // auto, dell or supermicro
+	Type        string // auto, dell, supermicro or megarac
 	WebPort     int
 	WebPortSet  bool // --web-port was given (desktop mode otherwise lets the OS choose)
 	NoBrowser   bool
@@ -34,6 +34,8 @@ type options struct {
 	MediaDirs   []string
 	IdleTimeout time.Duration
 	IdleSet     bool
+
+	Debug []string // --debug areas, as given (each may be a comma list)
 }
 
 const defaultWebPort = 8080
@@ -42,19 +44,21 @@ func printUsage() {
 	name := os.Args[0]
 	p := func(format string, a ...any) { fmt.Fprintf(os.Stderr, format, a...) }
 	p("Usage: %s [--desktop] [options]\n       %s <host> [options]\n\n", name, name)
-	p("Browser KVM console for legacy Dell (Avocent) and Supermicro (ATEN) BMCs.\n")
+	p("Browser KVM console for legacy Dell (Avocent), Supermicro (ATEN) and AMI MegaRAC BMCs.\n")
 	p("Without a host it starts the desktop connection manager in your browser.\n\n")
 	p("Options:\n")
 	p("  --desktop                 Start the connection manager (the default without a host)\n")
 	p("  -u, --user <username>     BMC username (default: $%s, else root)\n", envUser)
 	p("  -p, --pass <password>     Deprecated: visible in the process list. Use $%s\n", envPassword)
 	p("                            or the prompt.\n")
-	p("  --type <auto|dell|supermicro>  Force BMC vendor type (default: auto)\n")
+	p("  --type <auto|dell|supermicro|megarac>  Force BMC vendor type (default: auto)\n")
 	p("  --web-port <port>         Local console port (default: 8080 with a host, else any free port)\n")
 	p("  --no-browser              Do not open the web browser; print the link\n")
 	p("  --idle-timeout <duration> Disconnect and quit after this long with no browser\n")
 	p("                            (default: 30m in desktop mode, off with a host; 0 disables)\n")
-	p("  --media-dir <folder>      Also allow virtual media images from this folder (repeatable)\n\n")
+	p("  --media-dir <folder>      Also allow virtual media images from this folder (repeatable)\n")
+	p("  --debug <areas>           Log protocol details for troubleshooting (megarac-media);\n")
+	p("                            also $%s\n\n", envDebug)
 	p("Trust (asked interactively when a terminal is available):\n")
 	p("  --trust-fingerprint <SHA256>  Trust the BMC certificate with this SHA-256 fingerprint\n")
 	p("  --replace-fingerprint     Replace a pinned certificate that changed (with --trust-fingerprint)\n")
@@ -135,6 +139,7 @@ func parseArgs(args []string) options {
 		case value(&i, arg, setIdle, "--idle-timeout"):
 		case value(&i, arg, func(v string) { o.TrustFingerprints = append(o.TrustFingerprints, v) }, "--trust-fingerprint"):
 		case value(&i, arg, func(v string) { o.MediaDirs = append(o.MediaDirs, v) }, "--media-dir"):
+		case value(&i, arg, func(v string) { o.Debug = append(o.Debug, v) }, "--debug"):
 		case value(&i, arg, func(string) { o.PortIgnored = true }, "--port", "-port"):
 			o.PortIgnored = true
 		case !strings.HasPrefix(arg, "-"):

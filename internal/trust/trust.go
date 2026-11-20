@@ -171,7 +171,8 @@ func (e *CertificateChangedError) Error() string {
 }
 
 // LegacyTLSRequiredError means the device only completes a handshake with obsolete TLS
-// settings (TLS 1.0/1.1 or CBC/3DES suites), which the user has not authorised for it.
+// settings (TLS 1.0/1.1, or suites without forward secrecy / CBC / 3DES), which the user has
+// not authorised for it.
 type LegacyTLSRequiredError struct {
 	Device   string
 	Endpoint string
@@ -193,8 +194,13 @@ func IsTrustError(err error) bool {
 }
 
 // legacyCipherSuites are the suites old BMCs need, offered only when legacy TLS is authorised.
-// All are CBC-mode with SHA-1 MACs; the 3DES ones are also 64-bit block ciphers.
+// The static-RSA suites have no forward secrecy; the CBC ones use SHA-1 MACs; the 3DES ones are
+// also 64-bit block ciphers. The RSA-GCM suites are the strongest of these: Go ignores the
+// order of this list, so they are listed for BMCs (such as AMI MegaRAC) that support them and
+// would otherwise be negotiated down to CBC.
 var legacyCipherSuites = []uint16{
+	tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+	tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
 	tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
 	tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
 	tls.TLS_RSA_WITH_AES_256_CBC_SHA,
@@ -214,7 +220,8 @@ var modernCipherSuites = []uint16{
 	tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
 }
 
-// IsLegacy reports whether a negotiated version and suite are obsolete.
+// IsLegacy reports whether a negotiated version and suite are obsolete: TLS below 1.2, or any
+// suite offered only with legacy consent (no forward secrecy, CBC or 3DES).
 func IsLegacy(version, suite uint16) bool {
 	return version < tls.VersionTLS12 || slices.Contains(legacyCipherSuites, suite)
 }

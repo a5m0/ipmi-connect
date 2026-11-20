@@ -10,10 +10,11 @@
   </developer>
   <description>
     <p>
-      IPMI Connect replaces the Java Web Start KVM consoles of older Dell (Avocent) and
-      Supermicro (ATEN) baseboard management controllers. It speaks their KVM and virtual media
-      protocols itself and shows the console in its own window: video, keyboard, mouse, power
-      control and virtual media from local disk images.
+      IPMI Connect replaces the Java Web Start KVM consoles of older Dell (Avocent), Supermicro
+      (ATEN) and ASUS (AMI MegaRAC) baseboard management controllers. It speaks their KVM and
+      virtual media protocols itself and shows the console in its own window: video, keyboard,
+      mouse, power control and virtual media from local disk images. Support for AMI MegaRAC is
+      experimental.
     </p>
     <p>Security features:</p>
     <ul>

@@ -3,6 +3,7 @@ package vmedia_test
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -391,5 +392,17 @@ func TestReplacedImageIsNotServed(t *testing.T) {
 				t.Errorf("err = %v, want ErrImageReplaced", err)
 			}
 		})
+	}
+}
+
+// The panel reads history.length: before the first sample it must be an empty list, not null.
+func TestMediaStatusHistoryIsNeverNull(t *testing.T) {
+	m, _ := newManager(t)
+	b, err := json.Marshal(m.MediaStatus())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"history":[]`) {
+		t.Errorf("status %s: want an empty history list", b)
 	}
 }

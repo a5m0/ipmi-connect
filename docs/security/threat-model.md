@@ -59,7 +59,7 @@ memory, or attach a debugger. We do not defend against same-user malware.
 | Certificate swapped later | `CertificateChangedError`, also when the new certificate is CA-signed; replacement needs an explicit second confirmation (`replace`) |
 | Stripping TLS from the Dell KVM channel (clearing the APCP capability bit) | Once a device's KVM port has offered TLS, a plain offer needs fresh consent with a warning, whatever was allowed before, and the client refuses it meanwhile |
 | Two app instances overwriting each other's pins | Trust store changes take a file lock and apply to the latest file; reads notice other processes' writes |
-| Downgrade to obsolete TLS | TLS 1.2+ with AEAD suites by default; TLS 1.0/1.1 and CBC/3DES only after per-device consent, shown in the security indicator |
+| Downgrade to obsolete TLS | TLS 1.2+ with AEAD suites by default; TLS 1.0/1.1, or suites without forward secrecy / CBC / 3DES (static-RSA GCM or CBC, 3DES), only after per-device consent, shown in the security indicator |
 | HTTPS to HTTP downgrade | No code path uses http://; redirects to http are refused |
 | Redirect or JNLP pointing elsewhere | `bmc.Endpoint` dials only the resolved BMC address on allowed ports; redirects must stay on the same https origin; JNLP ports are range-checked and tokens length-checked |
 | DNS answers changing mid-session | The BMC is resolved once per connection; every later dial uses that address |
@@ -96,7 +96,7 @@ permission is all or nothing. Outside Flatpak, the process has the user's full p
 ## Remaining risks
 
 1. Supermicro X8-era KVM and virtual media are unencrypted by design of the firmware.
-2. Obsolete TLS (TLS 1.0, CBC, RSA key exchange, no forward secrecy) when consented.
+2. Obsolete TLS (TLS 1.0/1.1, CBC, 3DES, or static-RSA key exchange without forward secrecy, even with GCM) when consented.
 3. TOFU is only as good as the user's fingerprint check on first contact.
 4. The BMC password stays in process memory for the session (Go cannot reliably wipe strings).
 5. Flatpak does not restrict network destinations; the endpoint scoping is in-process only.

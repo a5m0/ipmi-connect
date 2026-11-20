@@ -128,7 +128,7 @@
         <span class="stat-sep">•</span>
         <span id="statFPS">FPS: 0</span>
         <span class="stat-sep">•</span>
-        <span id="statLatency">Ping: -- ms</span>
+        <span id="statLatency" title="Round trip to the BMC">Ping: -- ms</span>
       </div>
     </div>
 
@@ -182,6 +182,7 @@
                 <option value="auto">Detect automatically</option>
                 <option value="dell">Dell (Avocent)</option>
                 <option value="supermicro">Supermicro (ATEN)</option>
+                <option value="megarac">ASUS ASMB8 (AMI MegaRAC)</option>
               </select>
             </label>
             <label class="media-check connect-save"><input type="checkbox" id="cSave"> Save as a profile (never the password)</label>
@@ -261,16 +262,32 @@
           <button class="btn-close" id="btnCloseMedia">&times;</button>
         </div>
         <div class="modal-body media-body">
-          <form class="media-add" id="mediaAddForm">
-            <input type="text" class="media-input" id="mediaPath" placeholder="/full/path/to/image.iso or .img" spellcheck="false" autocomplete="off">
-            <button type="button" class="btn btn-secondary" id="btnBrowseImage">Browse…</button>
-            <button type="button" class="btn btn-secondary" id="btnPickNative" title="Choose a file with the desktop's file chooser" hidden>Choose File…</button>
-            <label class="media-check" title="Off: the host can only read the image"><input type="checkbox" id="mediaAddWritable"> Writable</label>
-            <button type="submit" class="btn btn-secondary">Add Image</button>
-          </form>
+          <p class="media-intro">Insert a disc or disk image into a drive: the host sees it as a USB device. To boot from it, restart the host and pick it in the BIOS boot menu (often <kbd>F11</kbd>).</p>
+
+          <div class="media-drives" id="mediaDrives"></div>
+
+          <h4 class="media-heading">Recent images</h4>
+          <table class="media-table">
+            <thead><tr><th>Image</th><th>Size</th><th>Access</th><th></th></tr></thead>
+            <tbody id="mediaImages"></tbody>
+          </table>
+
+          <h4 class="media-heading">Transfer <span class="media-rates" id="mediaRates"></span></h4>
+          <canvas class="media-graph" id="mediaGraph" width="720" height="90"></canvas>
+
+          <p class="media-error" id="mediaError" hidden></p>
 
           <details class="media-create">
-            <summary>Create Image…</summary>
+            <summary>Add an image by its path…</summary>
+            <form class="media-add" id="mediaAddForm">
+              <input type="text" class="media-input" id="mediaPath" placeholder="/full/path/to/image.iso or .img" spellcheck="false" autocomplete="off">
+              <label class="media-check" title="Off: the host can only read the image"><input type="checkbox" id="mediaAddWritable"> Writable</label>
+              <button type="submit" class="btn btn-secondary">Add to Recent</button>
+            </form>
+          </details>
+
+          <details class="media-create">
+            <summary>Create a new disk image…</summary>
             <form id="mediaCreateForm">
               <div class="media-create-row">
                 <label class="media-check"><input type="radio" name="createKind" value="blank" checked> Blank</label>
@@ -293,25 +310,9 @@
                 <input type="text" class="media-input media-label" id="mediaCreateLabel" placeholder="LABEL" maxlength="11" spellcheck="false" autocomplete="off">
                 <button type="submit" class="btn btn-secondary">Create</button>
               </div>
+              <p class="media-hint">The new image is writable and goes into Recent images, ready to insert.</p>
             </form>
           </details>
-
-          <h4 class="media-heading">Images</h4>
-          <table class="media-table">
-            <thead><tr><th>Image</th><th>Size</th><th>Read-only</th><th>Drive</th><th></th></tr></thead>
-            <tbody id="mediaImages"></tbody>
-          </table>
-
-          <h4 class="media-heading">Drives</h4>
-          <table class="media-table">
-            <thead><tr><th>Drive</th><th>Image</th><th>Read</th><th>Written</th><th></th></tr></thead>
-            <tbody id="mediaDrives"></tbody>
-          </table>
-
-          <h4 class="media-heading">Transfer <span class="media-rates" id="mediaRates"></span></h4>
-          <canvas class="media-graph" id="mediaGraph" width="720" height="90"></canvas>
-
-          <p class="media-error" id="mediaError" hidden></p>
         </div>
         <div class="modal-footer media-footer">
           <button class="btn btn-secondary" id="btnUsbReset" title="Reconnect the virtual media USB device on the host (about a second); mapped images stay mapped, keyboard and mouse are not affected">USB Reset</button>
@@ -337,6 +338,7 @@
         </div>
         <div class="modal-footer">
           <input type="text" class="media-input" id="pickerName" placeholder="new-image.img" spellcheck="false" autocomplete="off" hidden>
+          <button class="btn btn-secondary" id="pickerNative" title="Choose with your desktop's own file chooser (needed for files outside these folders in the Flatpak)" hidden>Desktop File Chooser…</button>
           <button class="btn btn-secondary" id="pickerCancel">Cancel</button>
           <button class="btn btn-secondary" id="pickerChoose" hidden>Use This Folder</button>
         </div>

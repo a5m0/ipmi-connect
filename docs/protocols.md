@@ -1,6 +1,6 @@
 # IPMI Wire Protocol Specifications
 
-This document defines the wire-level packet structures, opcodes, and sequence diagrams for the proprietary protocols used by Dell (Avocent) and Supermicro (ATEN) BMCs.
+This document defines the wire-level packet structures, opcodes, and sequence diagrams for the proprietary protocols used by Dell (Avocent) and Supermicro (ATEN) BMCs. The AMI MegaRAC (ASUS ASMB8-iKVM) single-port tunnel and IVTP protocol are documented in [asus-asmb8-ikvm.md](asus-asmb8-ikvm.md).
 
 ---
 

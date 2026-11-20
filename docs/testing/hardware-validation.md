@@ -16,7 +16,8 @@ Use a test server whose host OS you can lose, on a management network.
 
 - [ ] First connection shows a certificate dialog; its SHA-256 matches the one noted above.
 - [ ] Obsolete TLS is reported (expected: TLS 1.0, `TLS_RSA_WITH_AES_256_CBC_SHA` on the
-      Supermicro; Dell's web server negotiates a suite Go supports, record which).
+      Supermicro; TLS 1.2, `TLS_RSA_WITH_AES_128_GCM_SHA256` (GCM, not CBC; verified) on the ASUS ASMB8;
+      Dell's web server negotiates a suite Go supports, record which).
 - [ ] After consent, a second connection asks nothing; the trust list shows the device.
 - [ ] "Forget" makes the next connection ask again.
 - [ ] Old firmware keys: the certificate's key is RSA ≥ 1024 bits (Go refuses smaller keys);
@@ -50,6 +51,14 @@ Use a test server whose host OS you can lose, on a management network.
 - [ ] A mode change (BIOS → OS) still repaints: after the resize-once-per-update change,
       the picture recovers within a second or two.
 
+## ASUS ASMB8-iKVM (AMI MegaRAC)
+
+- [ ] KVM reconnect with media attached: attach the writable removable image (its host polls
+      TEST UNIT READY), then kill the app's KVM socket (the one with the most bytes received)
+      with `sudo ss -K`. Run with `--debug megarac-media` to see it: the app reconnects, the
+      drive keeps serving (`op=00` lines go on), and the new KVM session gets `MEDIA_STATE 1`. Eject and re-attach an image afterwards. Repeat with the drive
+      ejected. Seen on the test board: the BMC keeps the media tunnel in both cases.
+
 ## Desktop and lifecycle
 
 - [ ] Desktop launcher starts the app and opens the browser (GNOME and KDE, X11 and Wayland).
@@ -62,7 +71,7 @@ Use a test server whose host OS you can lose, on a management network.
 ## Flatpak
 
 - [ ] Install the bundle on Ubuntu 24.04 (x86_64) and an aarch64 machine; the launcher works.
-- [ ] "Choose File…" opens the desktop file chooser; the chosen ISO boots the host (random
+- [ ] "Desktop File Chooser…" (in the file picker) opens the desktop file chooser; the chosen ISO boots the host (random
       access through the document portal; note boot time versus the native build).
 - [ ] A chosen `.img` can be made writable and writes reach the file (document portal write
       access is unverified).
@@ -82,3 +91,27 @@ Use a test server whose host OS you can lose, on a management network.
 
 - [ ] `ipmi-connect` (desktop mode) opens Safari/Chrome; trust store under
       `~/Library/Application Support/ipmi-connect/`.
+
+## MegaRAC smoke test
+
+`test/e2e/megarac-smoke.sh` is an opt-in check against a real AMI MegaRAC BMC (e.g. the ASUS
+ASMB8-iKVM); CI never runs it. It builds ipmi-connect, connects with `--no-browser` (no browser
+is attached, so no keyboard, mouse, power or media input reaches the host), waits for
+`KVM session validated` and the first `Host video mode`, holds the session, sends SIGINT and
+passes only if the BMC was logged out (`Logged out of`) and nothing reconnected.
+
+```sh
+IPMI_CONNECT_SMOKE_HOST=bmc.example IPMI_CONNECT_SMOKE_USER=admin \
+IPMI_CONNECT_SMOKE_PASSWORD=... test/e2e/megarac-smoke.sh
+```
+
+Optional: `IPMI_CONNECT_SMOKE_FINGERPRINT` (the SHA-256 noted above, passed as
+`--trust-fingerprint` and pinned in your trust store), `IPMI_CONNECT_SMOKE_LEGACY_TLS=1`
+(`--allow-legacy-tls`), `IPMI_CONNECT_SMOKE_HOLD` (seconds, default 30),
+`IPMI_CONNECT_SMOKE_TIMEOUT` (seconds to wait for validation and video, default 60) and
+`IPMI_CONNECT_SMOKE_TYPE` (default `megarac`). It never prompts: with an unpinned certificate and
+no fingerprint it fails and shows the fingerprint the BMC presented; check it before rerunning
+with it. The password reaches ipmi-connect only through `$IPMI_CONNECT_PASSWORD`, and the
+console link is never printed.
+
+- [ ] `test/e2e/megarac-smoke.sh` passes (record the video mode and hold time).

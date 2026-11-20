@@ -7,6 +7,7 @@ const (
 	TargetAuto       TargetType = "auto"
 	TargetDell       TargetType = "dell"
 	TargetSupermicro TargetType = "supermicro"
+	TargetMegaRAC    TargetType = "megarac" // AMI MegaRAC SP (ASUS ASMB8-iKVM)
 )
 
 // SessionState holds status and telemetry of an active BMC session
@@ -21,8 +22,10 @@ type SessionState struct {
 	ScreenWidth   int        `json:"screen_width"`
 	ScreenHeight  int        `json:"screen_height"`
 	FPS           int        `json:"fps"`
-	StatusText    string     `json:"status_text"`
-	VirtualMedia  string     `json:"virtual_media"`
+	// PingMS is the round trip to the BMC in milliseconds; 0 while unknown.
+	PingMS       float64 `json:"ping_ms,omitempty"`
+	StatusText   string  `json:"status_text"`
+	VirtualMedia string  `json:"virtual_media"`
 	// Channels describes how each channel to the BMC is protected, for the security indicator.
 	Channels []ChannelSecurity `json:"channels"`
 	// SecurityLevel summarises Channels: SecurityOK, SecurityLegacy or SecurityInsecure.

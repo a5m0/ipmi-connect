@@ -14,7 +14,13 @@ function savePrefs(prefs) {
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* storage blocked */ }
 }
 
-export function setupPaste(sendMessage) {
+// BLOCKED is shown when no way of reading the clipboard worked.
+const BLOCKED = 'The browser blocked clipboard access';
+
+// setupPaste wires the type-text panel. apiFetch makes signed-in API requests; nativeClipboard
+// says whether the server can read the system clipboard (the desktop window, whose webview
+// refuses navigator.clipboard.readText).
+export function setupPaste(sendMessage, apiFetch, nativeClipboard = () => false) {
   const panel = document.getElementById('pastePanel');
   const text = document.getElementById('pasteText');
   const count = document.getElementById('pasteCount');
@@ -77,15 +83,28 @@ export function setupPaste(sendMessage) {
     start(value, true);
   }
 
-  async function fillFromClipboard() {
-    if (!navigator.clipboard?.readText) return false;
+  // readClipboard returns the clipboard's text: the browser's when it allows it, else the native
+  // clipboard through the server where there is one. It throws when neither works.
+  async function readClipboard() {
     try {
-      text.value = await navigator.clipboard.readText();
-    } catch {
-      return false; // permission denied
+      if (navigator.clipboard?.readText) return await navigator.clipboard.readText();
+    } catch { /* permission denied, or a webview that refuses */ }
+    if (!apiFetch || !nativeClipboard()) throw new Error(BLOCKED);
+    const resp = await apiFetch('/api/clipboard');
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok || typeof body.text !== 'string') throw new Error(body.error || `Could not read the clipboard (HTTP ${resp.status})`);
+    return body.text;
+  }
+
+  // fillFromClipboard puts the clipboard's text in the box; it returns the error, if any.
+  async function fillFromClipboard() {
+    try {
+      text.value = await readClipboard();
+    } catch (err) {
+      return err;
     }
     updateCount();
-    return true;
+    return null;
   }
 
   // Toasts sit above the panel while it is open, not over its buttons.
@@ -116,7 +135,8 @@ export function setupPaste(sendMessage) {
     text.focus();
   });
   document.getElementById('btnPasteClipboard').addEventListener('click', async () => {
-    if (!(await fillFromClipboard())) toast('The browser blocked clipboard access: paste into the box instead', 'error');
+    const err = await fillFromClipboard();
+    if (err) toast(`${err.message}: paste into the box instead`, 'error');
     text.focus();
   });
   text.addEventListener('input', updateCount);
@@ -137,9 +157,9 @@ export function setupPaste(sendMessage) {
     // fromClipboard types the clipboard straight away (Ctrl/Cmd+Shift+V on the console).
     async fromClipboard() {
       try {
-        start(await navigator.clipboard.readText(), false);
-      } catch {
-        toast('The browser blocked clipboard access: use the Paste button instead', 'error');
+        start(await readClipboard(), false);
+      } catch (err) {
+        toast(`${err.message}: use the Paste button instead`, 'error');
       }
     },
     // onResult handles the server's {"type":"typed"} reply for the paste in flight.

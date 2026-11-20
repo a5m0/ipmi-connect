@@ -26,7 +26,7 @@ type wailsUI struct {
 func newNativeUI() nativeUI {
 	app := application.New(application.Options{
 		Name:        "IPMI Connect",
-		Description: "Console for legacy Dell and Supermicro BMCs",
+		Description: "Console for legacy Dell, Supermicro and AMI MegaRAC BMCs",
 		Linux: application.LinuxOptions{
 			ApplicationID: appID,
 			ProgramName:   appID,
@@ -121,4 +121,31 @@ func (u *wailsUI) PickFiles(_ context.Context, title string, directory bool) ([]
 		return nil, err
 	}
 	return []string{path}, nil
+}
+
+// ReadClipboard returns the clipboard's text through the toolkit (GTK on Linux), which the
+// webview's own navigator.clipboard.readText refuses. The read runs on the GUI thread and cannot
+// be interrupted; ctx only stops the caller waiting for it.
+func (u *wailsUI) ReadClipboard(ctx context.Context) (string, error) {
+	if u.win == nil {
+		return "", errors.New("the window is not open yet")
+	}
+	type result struct {
+		text string
+		ok   bool
+	}
+	done := make(chan result, 1)
+	go func() {
+		text, ok := u.app.Clipboard.Text()
+		done <- result{text, ok}
+	}()
+	select {
+	case r := <-done:
+		if !r.ok {
+			return "", errors.New("the clipboard could not be read")
+		}
+		return r.text, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 }

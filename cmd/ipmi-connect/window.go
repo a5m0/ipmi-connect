@@ -11,4 +11,7 @@ type nativeUI interface {
 	SaveFile(ctx context.Context, title, suggestedName string, data []byte) (string, error)
 	// PickFiles chooses a file or folder; nil means cancelled.
 	PickFiles(ctx context.Context, title string, directory bool) ([]string, error)
+	// ReadClipboard returns the text on the system clipboard ("" when it holds none). The
+	// window's webview refuses navigator.clipboard.readText, so the paste panel asks Go.
+	ReadClipboard(ctx context.Context) (string, error)
 }

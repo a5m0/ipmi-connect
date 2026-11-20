@@ -28,7 +28,7 @@ const (
 const (
 	keepAliveInterval = 3 * time.Second  // the vendor client's keep-alive period
 	idlePoke          = 5 * time.Second  // ask for a full frame after this much silence
-	idleDead          = 15 * time.Second // reconnect after this much silence
+	idleDead          = 45 * time.Second // reconnect after this much silence
 	noSignalPoll      = time.Second
 	writeTimeout      = 5 * time.Second
 	sendQueueLen      = 64
@@ -60,6 +60,8 @@ type Session struct {
 	keepAliveEvery time.Duration
 
 	frame    *frame
+	ast      astVideo
+	astSeen  bool // the first ASPEED rect has been logged
 	noSignal bool
 	status   string
 	frames   int // decoded updates since the last FPS report
@@ -135,7 +137,7 @@ func (s *Session) Run(ctx context.Context, sink Sink) error {
 			idle := time.Since(lastMsg)
 			switch {
 			case idle > idleDead:
-				return errors.New("BMC silent for 15s")
+				return fmt.Errorf("BMC silent for %v", idleDead)
 			case s.noSignal:
 				s.enqueue(framebufferUpdateRequest(false, initW, initH))
 			case idle > idlePoke && !poked:
@@ -203,7 +205,7 @@ func (s *Session) handle(msg any, sink Sink) {
 			s.powerOn.Store(map[bool]int32{false: 0, true: 1}[m.PowerOn])
 		}
 	case Privilege:
-		log.Printf("[Supermicro] Session notice: %q", m.Text)
+		log.Printf("[Supermicro] Session notice %d/%d: %q", m.A, m.B, m.Text)
 		if m.A == 1 && m.B == 4 {
 			s.viewOnly.Store(true)
 			s.setStatus(sink, statusViewOnly)
@@ -237,8 +239,11 @@ func (s *Session) handleUpdate(u FramebufferUpdate, sink Sink) {
 			// A picture is allocated only for a rect that can be drawn, and at most once per
 			// update: otherwise one small message listing many empty rects of alternating sizes
 			// would force thousands of multi-megabyte allocations.
-			hermon := r.Encoding == 0x59 || r.Encoding == 0x00
-			if resized || !hermon || len(r.Data) == 0 {
+			drawable := r.Encoding == encodingHermon || r.Encoding == encodingHermonOld || r.Encoding == encodingAST
+			if !drawable {
+				s.setStatus(sink, fmt.Sprintf("%s (%#x)", statusUnsupported, r.Encoding))
+			}
+			if resized || !drawable || len(r.Data) == 0 {
 				continue
 			}
 			s.frame = newFrame(int(r.W), int(r.H))
@@ -246,8 +251,19 @@ func (s *Session) handleUpdate(u FramebufferUpdate, sink Sink) {
 			log.Printf("[Supermicro] Host video mode is %dx%d", r.W, r.H)
 		}
 		switch r.Encoding {
-		case 0x59, 0x00: // Hermon (older firmware reports 0)
+		case encodingHermon, encodingHermonOld:
 			if err := decodeHermon(r.Data, s.frame); err != nil {
+				log.Printf("[Supermicro] Dropping undecodable update: %v", err)
+				continue
+			}
+			changed = true
+			s.setStatus(sink, s.baseStatus())
+		case encodingAST:
+			if !s.astSeen {
+				s.astSeen = true
+				log.Printf("[Supermicro] ASPEED video %dx%d, first bytes % x", r.W, r.H, r.Data[:min(len(r.Data), 16)])
+			}
+			if err := s.ast.decode(r.Data, s.frame); err != nil {
 				log.Printf("[Supermicro] Dropping undecodable update: %v", err)
 				continue
 			}

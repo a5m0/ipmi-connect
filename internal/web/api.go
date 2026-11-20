@@ -18,12 +18,13 @@ type statusResponse struct {
 	Version     string `json:"version"`
 	Desktop     bool   `json:"desktop"`
 	SaveDialog  bool   `json:"save_dialog"` // screenshots go through POST /api/screenshot/save
+	Clipboard   bool   `json:"clipboard"`   // GET /api/clipboard reads the native clipboard
 	IdleTimeout int    `json:"idle_timeout_seconds,omitempty"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.StateMu.RLock()
-	resp := statusResponse{SessionState: s.State, Version: s.Version, Desktop: s.Desktop, SaveDialog: s.SaveFile != nil, IdleTimeout: int(s.IdleTimeout / time.Second)}
+	resp := statusResponse{SessionState: s.State, Version: s.Version, Desktop: s.Desktop, SaveDialog: s.SaveFile != nil, Clipboard: s.ReadClipboard != nil, IdleTimeout: int(s.IdleTimeout / time.Second)}
 	s.StateMu.RUnlock()
 	resp.Phase = session.PhaseIdle
 	if s.bound() != nil {

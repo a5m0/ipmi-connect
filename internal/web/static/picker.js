@@ -35,7 +35,9 @@ export function createPicker(apiFetch) {
   const error = document.getElementById('pickerError');
   const nameInput = document.getElementById('pickerName');
   const choose = document.getElementById('pickerChoose');
+  const native = document.getElementById('pickerNative');
   let state = null; // { mode, path, parent, resolve }
+  let nativeMissing = false; // the server said there is no desktop file chooser
 
   function finish(result) {
     modal.classList.remove('open');
@@ -88,6 +90,25 @@ export function createPicker(apiFetch) {
   up.addEventListener('click', () => state && state.parent && load(state.parent));
   rootsSelect.addEventListener('change', () => state && load(rootsSelect.value));
   document.getElementById('pickerCancel').addEventListener('click', () => finish(null));
+  // The desktop's own file chooser (xdg-desktop-portal), opened by the server on this machine's
+  // screen: in a Flatpak, the way to reach files outside the sandbox. It answers 501 without one.
+  native.addEventListener('click', async () => {
+    error.textContent = 'Choose a file in the window that opened on your desktop…';
+    error.hidden = false;
+    try {
+      const resp = await apiFetch('/api/media/pick', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ directory: false }),
+      });
+      const res = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(res.error || `Failed (HTTP ${resp.status})`);
+      if (res.paths && res.paths.length) return finish(res.paths[0]);
+      error.hidden = true;
+    } catch (e) {
+      if (/no desktop file chooser/.test(e.message)) { nativeMissing = true; native.hidden = true; }
+      error.textContent = e.message;
+    }
+    return undefined;
+  });
   document.getElementById('btnClosePicker').addEventListener('click', () => finish(null));
   choose.addEventListener('click', () => {
     if (!state) return;
@@ -109,6 +130,7 @@ export function createPicker(apiFetch) {
       nameInput.hidden = mode !== 'save';
       nameInput.value = suggestedName;
       choose.hidden = mode === 'file';
+      native.hidden = mode !== 'file' || nativeMissing;
       choose.textContent = mode === 'save' ? 'Save Here' : 'Use This Folder';
       error.hidden = true;
       modal.classList.add('open');

@@ -1,6 +1,6 @@
 # ipmi-connect
 
-A browser console for old Dell (Avocent) and Supermicro (ATEN) server BMCs, so you never have to fight Java Web Start again. One Go binary: video, keyboard, mouse, power control and virtual media, all in a normal browser tab.
+A browser console for old Dell (Avocent), Supermicro (ATEN) and ASUS (AMI MegaRAC) server BMCs, so you never have to fight Java Web Start again. One Go binary: video, keyboard, mouse, power control and virtual media, all in a normal browser tab.
 
 ![The ipmi-connect console showing a Linux host with a virtual CD attached](docs/images/console.png)
 
@@ -43,22 +43,28 @@ The desktop pictures come from the same test app in the native window
 
 ## Supported hardware
 
-It has been tested on the two boards I own. Other BMCs running the same firmware families may work, but I can't promise anything.
+It has been tested on the three boards I own (the ASUS module is newer to the project and experimental). Other BMCs running the same firmware families may work, but I can't promise anything.
 
-| | Dell PowerEdge C6220 II | Supermicro X8DTL-6F |
-| :--- | :--- | :--- |
-| BMC | ASPEED AST2300, Avocent firmware 2.62.5 | Winbond WPCM450, ATEN firmware 3.13 |
-| KVM protocol | Avocent APCP, two TLS sockets on 7578 | ATEN RFB 3.8 on 5900 |
+| | Dell PowerEdge C6220 II | Supermicro X8DTL-6F | ASUS ASMB8-iKVM (experimental) |
+| :--- | :--- | :--- | :--- |
+| BMC | ASPEED AST2300, Avocent firmware 2.62.5 | Winbond WPCM450, ATEN firmware 3.13 | ASPEED AST2400, AMI MegaRAC SP firmware |
+| KVM protocol | Avocent APCP, two TLS sockets on 7578 | ATEN RFB 3.8 on 5900 | AMI IVTP, tunnelled through the web server's TLS port (443) |
 
-| Feature | Dell | Supermicro |
-| :--- | :--- | :--- |
-| Login / clean logout | Works | Works |
-| Live video | Works (Go ASPEED decoder, verified frame-for-frame against Aspeed's reference) | Works (Go Hermon decoder) |
-| Keyboard | Works (USB HID) | Works (USB HID) |
-| Mouse | Works | Works (absolute position and buttons verified on hardware) |
-| Macros (Ctrl+Alt+Del, F-keys…) | Works | Implemented |
-| Power control | Works | Status verified; commands over the KVM socket or `ipmi.cgi` |
-| Virtual media | Works: ISO on CD/DVD (booted an installer), IMG on removable or floppy (read-write), Create Image, transfer graph, USB reset | Works: ISO on CD, IMG on removable or floppy (read-write), Create Image (blank or from a folder), all verified byte-exact on hardware; one drive at a time, see known issues |
+| Feature | Dell | Supermicro | ASUS (MegaRAC) |
+| :--- | :--- | :--- | :--- |
+| Login / clean logout | Works | Works | Works |
+| Live video | Works (Go ASPEED decoder, verified frame-for-frame against Aspeed's reference) | Works (Go Hermon decoder) | Works (same Go ASPEED decoder) |
+| Keyboard | Works (USB HID) | Works (USB HID) | Works (USB HID, type text verified) |
+| Mouse | Works | Works (absolute position and buttons verified on hardware) | Implemented (absolute), not yet tested on hardware |
+| Macros (Ctrl+Alt+Del, F-keys…) | Works | Implemented | Implemented |
+| Power control | Works | Status verified; commands over the KVM socket or `ipmi.cgi` | Status verified; commands over the KVM tunnel, not yet tested on hardware |
+| Virtual media | Works: ISO on CD/DVD (booted an installer), IMG on removable or floppy (read-write), Create Image, transfer graph, USB reset | Works: ISO on CD, IMG on removable or floppy (read-write), Create Image (blank or from a folder), all verified byte-exact on hardware; one drive at a time, see known issues | Works: ISO on CD, IMG on removable or floppy (read-write), verified on hardware; one drive at a time, and switching drive type waits two minutes, see known issues |
+
+**ASUS ASMB8-iKVM (experimental).** This module runs AMI MegaRAC SP on an ASPEED AST2400, with
+the KVM tunnelled through the web server's TLS port (`--type megarac`, or auto detection). Login,
+power status, live video, keyboard and type text are verified on one board; mouse and power
+commands are implemented but not yet tested on hardware, and virtual media is not implemented
+yet. See [docs/asus-asmb8-ikvm.md](docs/asus-asmb8-ikvm.md).
 
 The console also has a **type text** panel (paste or write text, and it is typed on the host as
 keystrokes, optionally followed by Enter; Ctrl/Cmd+Shift+V on the console types the clipboard
@@ -153,7 +159,7 @@ ipmi-connect 192.0.2.10                       # logs in as root and opens the co
 ipmi-connect 192.0.2.20 -u admin --no-browser  # print the console link instead
 ```
 
-The vendor is detected automatically; force it with `--type dell|supermicro`. Credentials come
+The vendor is detected automatically; force it with `--type dell|supermicro|megarac`. Credentials come
 from flags, then environment variables, then defaults:
 
 | | Flag | Environment | Default |
@@ -177,9 +183,10 @@ ipmi-connect 192.0.2.20 --type supermicro --allow-insecure-channels --trust-fing
 | `--no-browser` | print the link (valid 10 minutes) instead of opening it |
 | `--idle-timeout <duration>` | log out and quit after this long with no browser (`0` disables) |
 | `--media-dir <folder>` | also allow virtual media images from this folder (repeatable) |
+| `--debug <areas>` | log protocol details for troubleshooting; also `IPMI_CONNECT_DEBUG` (merged, comma lists allowed). `megarac-media` traces each MegaRAC media command and reply status, never the data |
 | `--trust-fingerprint <sha256>` | trust this certificate (repeatable) |
 | `--replace-fingerprint` | replace a pinned certificate that changed (with `--trust-fingerprint`) |
-| `--allow-legacy-tls` | allow TLS 1.0/1.1 and CBC/3DES ciphers for this BMC |
+| `--allow-legacy-tls` | allow TLS 1.0/1.1 and cipher suites without forward secrecy (static RSA, including RSA-GCM), CBC or 3DES for this BMC |
 | `--allow-insecure-channels` | allow unencrypted KVM / virtual media channels for this BMC |
 
 **Changed in this version:** earlier versions accepted any BMC certificate silently. A first,
@@ -247,16 +254,35 @@ never written to disk or logs.
 
 ### Virtual media
 
+The **Virtual Media** panel lists the host's drives (CD/DVD, removable disk, floppy). **Insert
+Image…** on a drive picks a file and attaches it in one step; **Eject** takes it out, and images
+you have used stay under **Recent images** to insert again with one click. To boot from a drive,
+restart the host and choose it in the BIOS boot menu (often F11).
+
 Images are offered only from your home folder (not hidden folders), ipmi-connect's private media
-folder, folders given with `--media-dir`, and files you pick with **Choose File…** (the desktop's
-file chooser). Images are attached **read-only** unless you tick **Writable** and confirm. Power
+folder, folders given with `--media-dir`, and files you pick with **Desktop File Chooser…** in the
+file picker. Images are attached **read-only** unless you tick **Writable** and confirm. Power
 actions that can lose work ask for confirmation.
+
+### Ubuntu network-install ISO
+
+`scripts/ubuntu-netinstall-iso.sh` builds a 1 MB boot ISO for virtual media that installs Ubuntu
+Server unattended over the network: iPXE with HTTPS fetches Ubuntu's netboot installer, and the
+same ISO carries the autoinstall config (user, SSH keys, static address or DHCP). It **erases
+the host's largest disk**, needs BIOS boot, about 6 GB of RAM and direct internet access, and
+can only install the current point release of a series, so build it right before you use it.
+Options and details are at the top of the script.
+
+```bash
+scripts/ubuntu-netinstall-iso.sh --ssh-keys ~/.ssh/id_ed25519.pub \
+  --ip 192.0.2.10/24 --gateway 192.0.2.1 --hostname web-01 --user admin
+```
 
 ### Flatpak sandbox
 
 The Flatpak can use the network and nothing else: no access to your files, SSH keys, devices,
-container sockets, display server or host commands. Pick images with **Choose File…** (only that
-file is shared with the app) or put them in
+container sockets, display server or host commands. Pick images with **Desktop File Chooser…**
+in the file picker (only that file is shared with the app) or put them in
 `~/.var/app/io.github.a5m0.IPMIConnect/data/ipmi-connect/media/`. Flatpak's network permission is
 all-or-nothing: it does **not** limit the app to your BMC, and it does not protect unencrypted
 BMC traffic. ipmi-connect itself only ever connects to the BMC you chose, on that BMC's ports. See
@@ -332,6 +358,7 @@ internal/
   bmc/                 Shared types, the BMC endpoint (scoped dialler and HTTP client), password prompt
   dell/                Avocent client: web session, APCP channels, heartbeat, video, input, power
   supermicro/          ATEN client: CGI session, RFB handshake and input, power
+  megarac/             AMI MegaRAC client: RPC session, single-port KVM tunnel, IVTP, input, power
   web/                 Local HTTP/WebSocket server, key macros, frame broadcast
     static/            Embedded browser UI
   aspeed/              ASPEED video decoder (Go port of Aspeed's MPL-2.0 reference)
@@ -348,6 +375,8 @@ test/e2e/              Browser test against a scripted fake BMC session
 ## Known issues
 
 - Supermicro: while the BMC's own web-UI media mount is active, it has one free virtual media slot, so a second drive is refused with "slots are full or busy".
+- ASUS ASMB8 (MegaRAC): the BMC serves one virtual media drive at a time and keeps it for about two minutes after its connection closes; an attach in that window hangs, and while it waits the BMC's web interface stalls too. ipmi-connect keeps the drive's connection open across ejects, so swapping images on the same drive is instant; switching to another drive type (or re-attaching after a dropped connection) is refused with the time left until the BMC frees the drive. USB reset is not available.
+- Supermicro (X7SB3, shared NIC): the BMC drops off the network for about 10 s whenever the host reboots, and keeps the session it lost as the keyboard and mouse owner for a while, so a reconnect is view only. ipmi-connect rides out up to 45 s of silence, and after losing a session that had control it keeps reconnecting for up to two minutes ("Waiting for the BMC to release keyboard and mouse…") until the BMC lets go.
 - `--port` is accepted for compatibility but ignored.
 - Desktop mode starts a new instance each time it is launched; a second launch does not reuse the first.
 
@@ -363,4 +392,4 @@ test/e2e/              Browser test against a scripted fake BMC session
 
 Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). The ASPEED video decoder in `internal/aspeed/` is ported from Aspeed's reference implementation and stays under the Mozilla Public License 2.0; see [internal/aspeed/LICENSE](internal/aspeed/LICENSE).
 
-ipmi-connect is an independent project, not affiliated with or endorsed by Dell, Vertiv (Avocent), ATEN, Supermicro or ASPEED. Their names are used only to describe compatibility; see [NOTICE](NOTICE) for the trademark details.
+ipmi-connect is an independent project, not affiliated with or endorsed by Dell, Vertiv (Avocent), ATEN, Supermicro, ASUS, AMI (American Megatrends) or ASPEED. Their names are used only to describe compatibility; see [NOTICE](NOTICE) for the trademark details.

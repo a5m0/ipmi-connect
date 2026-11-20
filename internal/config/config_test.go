@@ -24,6 +24,9 @@ func TestProfilesRoundTripWithoutPasswords(t *testing.T) {
 	if _, err := s.Save(Profile{Address: "https://x"}); err == nil {
 		t.Error("URL accepted as an address")
 	}
+	if err := validate(&Profile{Address: "192.0.2.12", Vendor: "megarac"}); err != nil {
+		t.Errorf("megarac vendor refused: %v", err)
+	}
 	if _, err := s.Save(Profile{Address: "192.0.2.11", Vendor: "hp"}); err == nil {
 		t.Error("unknown vendor accepted")
 	}

@@ -26,12 +26,23 @@ type fakeDisplay struct {
 	state    bmc.SessionState
 	events   []string
 	attached int
+	pings    []time.Duration
 }
 
 func (d *fakeDisplay) UpdateScreen(int, int, []byte) {}
 func (d *fakeDisplay) SetStatus(string)              {}
 func (d *fakeDisplay) SetFPS(int)                    {}
 func (d *fakeDisplay) SetPower(string)               {}
+func (d *fakeDisplay) SetPing(rtt time.Duration) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.pings = append(d.pings, rtt)
+}
+func (d *fakeDisplay) pingLog() []time.Duration {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]time.Duration(nil), d.pings...)
+}
 func (d *fakeDisplay) Attach(c bmc.Console, st bmc.SessionState) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -499,5 +510,32 @@ func TestKVMLosingTLSNeedsFreshConsent(t *testing.T) {
 	}
 	if dev, _ := store.Get("127.0.0.1"); dev.KVMTLS {
 		t.Error("consented downgrade not recorded")
+	}
+}
+
+// The stats bar shows the round trip to the BMC while connected, and nothing after.
+func TestConnectedSessionReportsPingUntilDisconnect(t *testing.T) {
+	bmcSrv := newFakeBMC(t, nil)
+	v := &fakeVendor{}
+	m, d := newManager(v, trusted(t, bmcSrv))
+	m.pingEvery = 10 * time.Millisecond
+	if _, err := m.Connect(context.Background(), req(bmcSrv.addr())); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for len(d.pingLog()) < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("no ping reported while connected")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if p := d.pingLog()[0]; p <= 0 {
+		t.Errorf("first ping %v, want a positive round trip", p)
+	}
+	m.Disconnect()
+	n := len(d.pingLog())
+	time.Sleep(50 * time.Millisecond)
+	if got := d.pingLog(); len(got) != n {
+		t.Errorf("still pinging after disconnect: %d -> %d reports", n, len(got))
 	}
 }

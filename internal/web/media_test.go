@@ -3,10 +3,12 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +22,7 @@ type fakeMediaConsole struct {
 	mu     sync.Mutex
 	calls  []string
 	failOn string
+	images []bmc.MediaImage // added so far, reported by MediaStatus
 }
 
 func (f *fakeMediaConsole) record(call string) error {
@@ -36,7 +39,15 @@ func (f *fakeMediaConsole) AddImage(path string, ro bool) (bmc.MediaImage, error
 	if err := f.record("add " + path); err != nil {
 		return bmc.MediaImage{}, err
 	}
-	return bmc.MediaImage{ID: "abc", Path: path, ReadOnly: ro}, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := "abc"
+	if len(f.images) > 0 {
+		id = fmt.Sprintf("id%d", len(f.images))
+	}
+	im := bmc.MediaImage{ID: id, Path: path, ReadOnly: ro}
+	f.images = append(f.images, im)
+	return im, nil
 }
 func (f *fakeMediaConsole) RemoveImage(id string) error { return f.record("remove " + id) }
 func (f *fakeMediaConsole) SetImageReadOnly(id string, ro bool) error {
@@ -51,7 +62,15 @@ func (f *fakeMediaConsole) MapImage(id string, t bmc.MediaTarget) error {
 func (f *fakeMediaConsole) UnmapDrive(t bmc.MediaTarget) error { return f.record("unmap " + string(t)) }
 func (f *fakeMediaConsole) USBReset() error                    { return f.record("usb-reset") }
 func (f *fakeMediaConsole) MediaStatus() bmc.MediaStatus {
-	return bmc.MediaStatus{Images: []bmc.MediaImage{}, Drives: []bmc.MediaDrive{}}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return bmc.MediaStatus{Images: append([]bmc.MediaImage{}, f.images...), Drives: []bmc.MediaDrive{}}
+}
+
+func (f *fakeMediaConsole) callLog() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.calls...)
 }
 
 func mediaServer(t *testing.T, console bmc.Console) (*Server, http.Handler) {
@@ -216,3 +235,41 @@ func TestCreateImageAPI(t *testing.T) {
 }
 
 func newRecorder() *httptest.ResponseRecorder { return httptest.NewRecorder() }
+
+// Inserting a file into a drive adds it to the list (or reuses its entry) and maps it, in one
+// request: the media panel's Insert button.
+func TestInsertByPathAddsAndMapsInOneStep(t *testing.T) {
+	fc := &fakeMediaConsole{}
+	srv, h := mediaServer(t, fc)
+	dir := realTemp(t)
+	srv.Media.AddRoot(dir)
+	iso, img := filepath.Join(dir, "x.iso"), filepath.Join(dir, "d.img")
+	_ = os.WriteFile(iso, make([]byte, 2048), 0o600)
+	_ = os.WriteFile(img, make([]byte, 1474560), 0o600)
+
+	steps := []struct {
+		target, body string
+		wantCode     int
+		wantCalls    []string
+	}{
+		{"cd", `{"path":"` + iso + `"}`, 200, []string{"add " + iso, "map abc cd"}},
+		{"cd", `{"path":"` + iso + `"}`, 200, []string{"map abc cd"}}, // already listed: reused
+		{"removable", `{"path":"` + img + `","read_only":false}`, 400, nil},
+		{"removable", `{"path":"` + img + `","read_only":false,"confirm_writable":true}`, 200,
+			[]string{"add " + img, "map id1 removable"}},
+		{"removable", `{"path":"` + img + `"}`, 200, []string{"readonly id1", "map id1 removable"}},
+		{"cd", `{"path":"/etc/passwd"}`, 400, nil},
+		{"cd", `{"path":"` + iso + `","image_id":"abc"}`, 400, nil},
+	}
+	for _, st := range steps {
+		before := len(fc.callLog())
+		rec := mediaRequest(srv, h, http.MethodPost, "/api/media/drives/"+st.target, st.body)
+		if rec.Code != st.wantCode {
+			t.Errorf("%s %s: HTTP %d (%s), want %d", st.target, st.body, rec.Code, strings.TrimSpace(rec.Body.String()), st.wantCode)
+			continue
+		}
+		if got := fc.callLog()[before:]; !slices.Equal(got, st.wantCalls) && (len(got) != 0 || st.wantCalls != nil) {
+			t.Errorf("%s %s: calls %q, want %q", st.target, st.body, got, st.wantCalls)
+		}
+	}
+}
