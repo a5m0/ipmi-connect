@@ -121,7 +121,7 @@ func (c *Client) Run(ctx context.Context, sink Sink) {
 			sink.SetStatus(err.Error())
 			return
 		}
-		wait := delay
+		var wait time.Duration
 		switch {
 		case errors.Is(err, errReclaim):
 			log.Printf("[Supermicro] %v; retrying in %v", err, c.reclaimDelay)

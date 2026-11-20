@@ -108,7 +108,9 @@ func TestAssemblerJoinsFragments(t *testing.T) {
 		t.Fatalf("frame %q, %v", f, err)
 	}
 	// Index 0 starts afresh, dropping an unfinished frame.
-	a.add(fragment(0, false, []byte("xx")))
+	if _, err := a.add(fragment(0, false, []byte("xx"))); err != nil {
+		t.Fatal(err)
+	}
 	if f, _ := a.add(fragment(0, true, []byte("yz"))); string(f) != "yz" {
 		t.Fatalf("restarted frame %q", f)
 	}
@@ -127,7 +129,9 @@ func TestAssemblerDropsFramesWithoutAStart(t *testing.T) {
 func TestAssemblerBoundsFrameSize(t *testing.T) {
 	var a assembler
 	chunk := make([]byte, 1<<20)
-	a.add(fragment(0, false, chunk))
+	if _, err := a.add(fragment(0, false, chunk)); err != nil {
+		t.Fatal(err)
+	}
 	var err error
 	for i := 1; i < 64 && err == nil; i++ {
 		_, err = a.add(fragment(i, false, chunk))

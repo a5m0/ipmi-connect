@@ -101,7 +101,7 @@ func detectByBanner(ctx context.Context, ep *bmc.Endpoint) bmc.TargetType {
 		if err != nil {
 			return ""
 		}
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		body = gz
 	}
 	page, _ := io.ReadAll(io.LimitReader(body, maxBannerBody))

@@ -73,7 +73,7 @@ func newFakeBMCServer(t *testing.T) *fakeBMCServer {
 		t.Fatal(err)
 	}
 	f.ln = ln
-	t.Cleanup(func() { close(f.closing); ln.Close(); f.srv.Close() })
+	t.Cleanup(func() { close(f.closing); _ = ln.Close(); f.srv.Close() })
 	go f.accept()
 	return f
 }

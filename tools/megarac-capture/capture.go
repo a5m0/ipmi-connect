@@ -61,7 +61,7 @@ func newLogger(w io.Writer) logFunc {
 	return func(format string, a ...any) {
 		mu.Lock()
 		defer mu.Unlock()
-		fmt.Fprintf(w, "%9.3f "+format+"\n", append([]any{time.Since(start).Seconds()}, a...)...)
+		_, _ = fmt.Fprintf(w, "%9.3f "+format+"\n", append([]any{time.Since(start).Seconds()}, a...)...)
 	}
 }
 
@@ -397,10 +397,10 @@ func describeIUSB(dir string, f []byte) string {
 	}
 	op := f[iusbCDBAt]
 	d += fmt.Sprintf(" op=%02x", op)
-	switch {
-	case op == opAuth:
+	switch op {
+	case opAuth:
 		return d // the token follows
-	case op == opAuthReply:
+	case opAuthReply:
 		if len(f) > iusbAuthStat {
 			d += fmt.Sprintf(" authstat=%d", f[iusbAuthStat])
 		}

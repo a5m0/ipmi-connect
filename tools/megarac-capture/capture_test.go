@@ -273,7 +273,7 @@ func newFakeBMC(t *testing.T, reply []byte) *fakeBMC {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 	f := &fakeBMC{ln: ln, cert: srv.Certificate(), request: make(chan string, 1), got: make(chan []byte, 1)}
 	go func() {
 		c, err := ln.Accept()
@@ -324,7 +324,7 @@ func startProxy(t *testing.T, addr, fp string) (string, *tls.Config, *logBuf) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 	log := &logBuf{}
 	p := &proxy{target: target, dial: dial, logf: log.logf}
 	go func() { _ = p.serve(ln) }()
@@ -339,7 +339,7 @@ func dialProxy(t *testing.T, addr string, cfg *tls.Config) *tls.Conn {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 	return conn
 }

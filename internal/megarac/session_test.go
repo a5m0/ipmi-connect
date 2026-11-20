@@ -255,9 +255,12 @@ func TestSessionStopsOnContextAndSendsStopSession(t *testing.T) {
 	if m := bmcSide.expect(typeStopSession); len(m.Payload) != 0 || m.Status != 0 {
 		t.Errorf("STOP_SESSION status %d, %d payload bytes", m.Status, len(m.Payload))
 	}
-	go io.Copy(io.Discard, bmcSide.r)
+	go func() { _, _ = io.Copy(io.Discard, bmcSide.r) }()
 	select {
-	case <-done:
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Run returned %v, want context.Canceled", err)
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not return after cancel")
 	}
