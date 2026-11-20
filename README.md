@@ -264,6 +264,20 @@ folder, folders given with `--media-dir`, and files you pick with **Desktop File
 file picker. Images are attached **read-only** unless you tick **Writable** and confirm. Power
 actions that can lose work ask for confirmation.
 
+### Ubuntu network-install ISO
+
+`scripts/ubuntu-netinstall-iso.sh` builds a 1 MB boot ISO for virtual media that installs Ubuntu
+Server unattended over the network: iPXE with HTTPS fetches Ubuntu's netboot installer, and the
+same ISO carries the autoinstall config (user, SSH keys, static address or DHCP). It **erases
+the host's largest disk**, needs BIOS boot, about 6 GB of RAM and direct internet access, and
+can only install the current point release of a series, so build it right before you use it.
+Options and details are at the top of the script.
+
+```bash
+scripts/ubuntu-netinstall-iso.sh --ssh-keys ~/.ssh/id_ed25519.pub \
+  --ip 192.0.2.10/24 --gateway 192.0.2.1 --hostname web-01 --user admin
+```
+
 ### Flatpak sandbox
 
 The Flatpak can use the network and nothing else: no access to your files, SSH keys, devices,
