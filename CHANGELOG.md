@@ -1,3 +1,29 @@
+## [0.4.0](https://github.com/a5m0/ipmi-connect/compare/v0.3.0...v0.4.0) (2026-11-20)
+
+### Features
+
+* --debug / IPMI_CONNECT_DEBUG with a megarac-media trace ([9a6dcff](https://github.com/a5m0/ipmi-connect/commit/9a6dcff64cf98c0a6b1916d10a7a7131dc6865d6))
+* **desktop:** read the clipboard natively for paste ([74b4c7f](https://github.com/a5m0/ipmi-connect/commit/74b4c7f302418d8865a2f90986fa3102771b02fc))
+* **megarac:** AMI MegaRAC backend for the ASUS ASMB8-iKVM ([7586670](https://github.com/a5m0/ipmi-connect/commit/75866701aef1e88844c3c1b70e0d3f0b741840dc))
+* **megarac:** keep media tunnels open across ejects ([73e93e3](https://github.com/a5m0/ipmi-connect/commit/73e93e3681b8138d2ec758846d951a206f5fb81e))
+* **megarac:** track the host's keyboard LEDs ([3b63ae3](https://github.com/a5m0/ipmi-connect/commit/3b63ae3ba4495ce781e16c3ca7b439bae81da349))
+* **megarac:** virtual media over IUSB tunnels ([2e20b54](https://github.com/a5m0/ipmi-connect/commit/2e20b54b32e342a682e4e44835c533081baaa36f))
+* **scripts:** ubuntu-netinstall-iso.sh, a 1 MB unattended Ubuntu netinstall ISO ([fbfcd15](https://github.com/a5m0/ipmi-connect/commit/fbfcd15b2de10aa05299ef44721c9ddea89b330a))
+* show the round trip to the BMC as Ping in the stats bar ([363c097](https://github.com/a5m0/ipmi-connect/commit/363c09709ac979733370b10ca89bf0e66abb9fd3))
+* **supermicro:** ASUS ASMB8-iKVM support (MegaRAC web login, ASPEED video) ([27f3793](https://github.com/a5m0/ipmi-connect/commit/27f379390754203e673b6ec6527cefb80830e0d0))
+* **tools:** megarac-capture, a logging proxy for JViewer captures ([f5bc080](https://github.com/a5m0/ipmi-connect/commit/f5bc080c39caefba101b244363ca6348f6a460ce))
+* **trust:** offer static-RSA AES-GCM suites under legacy TLS consent ([d89d1ee](https://github.com/a5m0/ipmi-connect/commit/d89d1ee993d7cc91f907147d58ea9c2dd5a580a1))
+* **ui:** drive-centric virtual media panel ([b5cb79f](https://github.com/a5m0/ipmi-connect/commit/b5cb79fe9d94c0fa65e19ed6cf1ad7d58d4306de))
+
+### Bug Fixes
+
+* golangci-lint findings (errcheck, ineffassign, staticcheck) ([8d34672](https://github.com/a5m0/ipmi-connect/commit/8d34672dd1f546973561eb6c1440a34622809040))
+* **megarac:** accept the ASMB8's IUSB headers; explain busy drives ([c5f33f7](https://github.com/a5m0/ipmi-connect/commit/c5f33f71f468b6e465fa19aac38598fc9ef5b1fc))
+* **megarac:** leave the KVM and media the way JViewer does ([4dc1aef](https://github.com/a5m0/ipmi-connect/commit/4dc1aeff824de336074a5573e5ac27e39d897325))
+* **megarac:** one media drive at a time, with the BMC's two-minute wait ([4279bac](https://github.com/a5m0/ipmi-connect/commit/4279bac3ac9d69a5483b3cc1fd9c88b42bc39e76))
+* **megarac:** tell a reconnected KVM session that a drive is connected ([8c39991](https://github.com/a5m0/ipmi-connect/commit/8c399910b3ff0b9fde7ade6ecdb0b4ca8152b3b3))
+* **supermicro:** ride out host-reboot outages and reclaim keyboard/mouse control ([b78a945](https://github.com/a5m0/ipmi-connect/commit/b78a945ae72aec99d4a96aeae1703a08934d6f7b))
+
 ## [0.3.0](https://github.com/a5m0/ipmi-connect/compare/v0.2.0...v0.3.0) (2026-11-19)
 
 ### Features
