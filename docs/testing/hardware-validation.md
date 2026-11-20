@@ -71,7 +71,7 @@ Use a test server whose host OS you can lose, on a management network.
 ## Flatpak
 
 - [ ] Install the bundle on Ubuntu 24.04 (x86_64) and an aarch64 machine; the launcher works.
-- [ ] "Choose File…" opens the desktop file chooser; the chosen ISO boots the host (random
+- [ ] "Desktop File Chooser…" (in the file picker) opens the desktop file chooser; the chosen ISO boots the host (random
       access through the document portal; note boot time versus the native build).
 - [ ] A chosen `.img` can be made writable and writes reach the file (document portal write
       access is unverified).

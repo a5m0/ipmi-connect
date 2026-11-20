@@ -254,16 +254,21 @@ never written to disk or logs.
 
 ### Virtual media
 
+The **Virtual Media** panel lists the host's drives (CD/DVD, removable disk, floppy). **Insert
+Image…** on a drive picks a file and attaches it in one step; **Eject** takes it out, and images
+you have used stay under **Recent images** to insert again with one click. To boot from a drive,
+restart the host and choose it in the BIOS boot menu (often F11).
+
 Images are offered only from your home folder (not hidden folders), ipmi-connect's private media
-folder, folders given with `--media-dir`, and files you pick with **Choose File…** (the desktop's
-file chooser). Images are attached **read-only** unless you tick **Writable** and confirm. Power
+folder, folders given with `--media-dir`, and files you pick with **Desktop File Chooser…** in the
+file picker. Images are attached **read-only** unless you tick **Writable** and confirm. Power
 actions that can lose work ask for confirmation.
 
 ### Flatpak sandbox
 
 The Flatpak can use the network and nothing else: no access to your files, SSH keys, devices,
-container sockets, display server or host commands. Pick images with **Choose File…** (only that
-file is shared with the app) or put them in
+container sockets, display server or host commands. Pick images with **Desktop File Chooser…**
+in the file picker (only that file is shared with the app) or put them in
 `~/.var/app/io.github.a5m0.IPMIConnect/data/ipmi-connect/media/`. Flatpak's network permission is
 all-or-nothing: it does **not** limit the app to your BMC, and it does not protect unencrypted
 BMC traffic. ipmi-connect itself only ever connects to the BMC you chose, on that BMC's ports. See
@@ -357,6 +362,7 @@ test/e2e/              Browser test against a scripted fake BMC session
 
 - Supermicro: while the BMC's own web-UI media mount is active, it has one free virtual media slot, so a second drive is refused with "slots are full or busy".
 - ASUS ASMB8 (MegaRAC): the BMC serves one virtual media drive at a time and keeps it for about two minutes after its connection closes; an attach in that window hangs, and while it waits the BMC's web interface stalls too. ipmi-connect keeps the drive's connection open across ejects, so swapping images on the same drive is instant; switching to another drive type (or re-attaching after a dropped connection) is refused with the time left until the BMC frees the drive. USB reset is not available.
+- Supermicro (X7SB3, shared NIC): the BMC drops off the network for about 10 s whenever the host reboots, and keeps the session it lost as the keyboard and mouse owner for a while, so a reconnect is view only. ipmi-connect rides out up to 45 s of silence, and after losing a session that had control it keeps reconnecting for up to two minutes ("Waiting for the BMC to release keyboard and mouse…") until the BMC lets go.
 - `--port` is accepted for compatibility but ignored.
 - Desktop mode starts a new instance each time it is launched; a second launch does not reuse the first.
 

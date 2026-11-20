@@ -66,14 +66,33 @@ func (s *Server) mediaRoutes(mux *http.ServeMux) {
 		if err != nil {
 			return err
 		}
+		// Either an image already in the list, or a file to insert: it is added to the list
+		// (or its entry reused) first. Read-only unless writing is explicitly confirmed.
 		var req struct {
-			ImageID string `json:"image_id"`
+			ImageID         string `json:"image_id"`
+			Path            string `json:"path"`
+			ReadOnly        *bool  `json:"read_only"`
+			ConfirmWritable bool   `json:"confirm_writable"`
 		}
-		if err := decode(r, &req); err != nil || req.ImageID == "" {
-			return badRequest(`send {"image_id": "..."}`)
+		if err := decode(r, &req); err != nil || (req.ImageID == "") == (req.Path == "") {
+			return badRequest(`send {"image_id": "..."} or {"path": "/full/path/to/image.iso"}`)
 		}
-		log.Printf("[Server] Mapping image %q to the %s drive", req.ImageID, target)
-		return vm.MapImage(req.ImageID, target)
+		id := req.ImageID
+		if req.Path != "" {
+			readOnly := req.ReadOnly == nil || *req.ReadOnly
+			if !readOnly && !req.ConfirmWritable {
+				return badRequest("writable images need confirmation: the host can change or erase them")
+			}
+			path, err := s.resolveMedia(req.Path)
+			if err != nil {
+				return err
+			}
+			if id, err = listedImage(vm, path, readOnly); err != nil {
+				return err
+			}
+		}
+		log.Printf("[Server] Mapping image %q to the %s drive", id, target)
+		return vm.MapImage(id, target)
 	}))
 	mux.HandleFunc("DELETE /api/media/drives/{target}", s.media(func(vm bmc.VirtualMedia, r *http.Request) error {
 		target, err := mediaTarget(r)
@@ -122,6 +141,24 @@ func (s *Server) mediaRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/media/usb-reset", s.media(func(vm bmc.VirtualMedia, r *http.Request) error {
 		return vm.USBReset()
 	}))
+}
+
+// listedImage returns the id of the image at path, adding it to the list if it is not there and
+// setting its read-only flag as asked.
+func listedImage(vm bmc.VirtualMedia, path string, readOnly bool) (string, error) {
+	for _, im := range vm.MediaStatus().Images {
+		if im.Path != path {
+			continue
+		}
+		if im.ReadOnly != readOnly && im.MappedTo == "" {
+			if err := vm.SetImageReadOnly(im.ID, readOnly); err != nil {
+				return "", err
+			}
+		}
+		return im.ID, nil
+	}
+	im, err := vm.AddImage(path, readOnly)
+	return im.ID, err
 }
 
 // resolveMedia checks a path against the media roots and returns its real path.

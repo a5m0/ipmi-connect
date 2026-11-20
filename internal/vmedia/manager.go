@@ -370,7 +370,7 @@ func (m *Manager) MediaStatus() bmc.MediaStatus {
 		}
 		st.Drives = append(st.Drives, d)
 	}
-	st.History = append([]bmc.MediaSample(nil), m.history...)
+	st.History = append([]bmc.MediaSample{}, m.history...) // [] not null: the panel reads its length
 	return st
 }
 

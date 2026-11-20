@@ -1,14 +1,15 @@
-// Virtual media panel: image library, drives, transfer graph and USB reset.
-// Everything from the server is inserted with textContent, never as HTML.
+// Virtual media panel: one row per drive with Insert/Eject, the recent images, the transfer
+// graph and USB reset. Everything from the server is inserted with textContent, never as HTML.
 import { createPicker } from '/picker.js';
 
-const TARGET_NAMES = { cd: 'CD/DVD', removable: 'Removable', floppy: 'Floppy' };
+const TARGET_NAMES = { cd: 'CD/DVD', removable: 'Removable disk', floppy: 'Floppy' };
+const TARGET_HINTS = { cd: '.iso images', removable: '.img disk images', floppy: 'small .img images' };
 const TARGETS = ['cd', 'removable', 'floppy'];
 const POLL_OPEN_MS = 1000;   // while the panel is open: the graph is live
 const POLL_CLOSED_MS = 3000; // otherwise: just the toolbar badge (1 s while a drive is mapped)
 
 export function formatBytes(n) {
-  if (n < 1024) return `${n} B`;
+  if (n < 1024) return `${Math.round(n)} B`;
   const units = ['KiB', 'MiB', 'GiB', 'TiB'];
   let v = n / 1024;
   let i = 0;
@@ -23,12 +24,14 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
+function baseName(path) { return path.split('/').pop(); }
+
 export function setupMedia(apiFetch) {
   const button = document.getElementById('btnMedia');
   const badge = document.getElementById('mediaBadge');
   const modal = document.getElementById('mediaModal');
   const imagesBody = document.getElementById('mediaImages');
-  const drivesBody = document.getElementById('mediaDrives');
+  const drivesBox = document.getElementById('mediaDrives');
   const errorLine = document.getElementById('mediaError');
   const rates = document.getElementById('mediaRates');
   const graph = document.getElementById('mediaGraph');
@@ -36,9 +39,13 @@ export function setupMedia(apiFetch) {
   const pick = createPicker(apiFetch);
   let status = null;
   let busy = false; // an action is in flight: keep its message until it answers
+  let actionError = ''; // the last action's error: shown until the next action, not cleared by polls
   let timer = null;
   let imagesKey = ''; // what the image rows were last built from
   const chosen = {};  // drive picked in each image's dropdown, kept across rebuilds
+  const writable = {}; // per drive: insert the next image writable (confirmed)
+  const cards = {};    // per drive: { key, node, counters }
+  const lastCount = {}; // per drive: { at, read, written } from the previous poll, for its rate
 
   function showError(text) {
     errorLine.textContent = text || '';
@@ -60,68 +67,145 @@ export function setupMedia(apiFetch) {
   // act runs an action, then shows the status it returns (or its error).
   async function act(method, path, body, pending, done = '') {
     busy = true;
-    if (pending) showError(pending);
+    actionError = '';
+    showError(pending || '');
     try {
       render(await call(method, path, body));
       showError(done);
     } catch (e) {
+      actionError = e.message;
       showError(e.message);
     } finally {
       busy = false;
     }
   }
 
-  function imageRow(img) {
-    const ro = el('input', { type: 'checkbox', checked: img.read_only });
-    ro.disabled = img.kind === 'iso' || Boolean(img.mapped_to);
-    ro.title = img.kind === 'iso' ? 'ISO images are always read-only' : 'Change while not mapped';
-    ro.addEventListener('change', () => {
-      if (!ro.checked && !window.confirm(`Let the host write to ${img.name}? It can change or erase everything in the image.`)) {
-        ro.checked = true;
-        return;
-      }
-      act('PATCH', `/api/media/images/${encodeURIComponent(img.id)}`, { read_only: ro.checked, confirm_writable: !ro.checked });
-    });
+  // insert asks for a file and puts it into drive t, adding it to the recent list on the way.
+  async function insert(t) {
+    const path = await pick('file', `Insert into ${TARGET_NAMES[t]} (${TARGET_HINTS[t]})`);
+    if (!path) return;
+    const w = Boolean(writable[t]) && t !== 'cd';
+    await act('POST', `/api/media/drives/${t}`, { path, read_only: !w, confirm_writable: w },
+      `Inserting ${baseName(path)}… (the BMC can take a few seconds to free a drive)`);
+  }
 
-    const drive = el('td');
+  function writableBox(t) {
+    const box = el('input', { type: 'checkbox', checked: Boolean(writable[t]) });
+    box.addEventListener('change', () => {
+      if (box.checked && !window.confirm(`Let the host write to the image you insert into ${TARGET_NAMES[t]}? It can change or erase everything in it.`)) {
+        box.checked = false;
+      }
+      writable[t] = box.checked;
+    });
+    return el('label', { className: 'media-check media-writable', title: 'Off: the host can only read the image' }, box, ' Writable');
+  }
+
+  // A drive's rate since the previous poll, from its byte counters.
+  function driveRate(d) {
+    const now = Date.now();
+    const prev = lastCount[d.target];
+    lastCount[d.target] = { at: now, read: d.bytes_read, written: d.bytes_written, image: d.image_id };
+    if (!prev || prev.image !== d.image_id || now <= prev.at) return null;
+    const secs = (now - prev.at) / 1000;
+    return { read: Math.max(0, d.bytes_read - prev.read) / secs, written: Math.max(0, d.bytes_written - prev.written) / secs };
+  }
+
+  function counterText(d) {
+    const rate = driveRate(d);
+    let text = `read ${formatBytes(d.bytes_read)}`;
+    if (!d.read_only) text += ` · written ${formatBytes(d.bytes_written)}`;
+    if (rate && rate.read + rate.written > 0) {
+      text += ` · ${formatBytes(rate.read + rate.written)}/s`;
+    } else if (rate) {
+      text += ' · idle';
+    }
+    return text;
+  }
+
+  // driveCard builds drive t's row; it is rebuilt only when what it shows changes, and its
+  // counters are updated in place, so a click or a ticked box is never lost to a poll.
+  function driveCard(t) {
+    const d = status.drives.find((x) => x.target === t);
+    const key = JSON.stringify(d ? [d.image_id, d.mounting, d.read_only] : null);
+    let card = cards[t];
+    if (!card || card.key !== key) {
+      const icon = el('span', { className: `media-drive-icon ${t}`, ariaHidden: 'true' });
+      const name = el('div', { className: 'media-drive-name', textContent: TARGET_NAMES[t] });
+      const body = el('div', { className: 'media-drive-body' }, name);
+      const actions = el('div', { className: 'media-drive-actions' });
+      let counters = null;
+      if (!d) {
+        body.append(el('div', { className: 'media-drive-state empty', textContent: `Empty: takes ${TARGET_HINTS[t]}` }));
+        if (t !== 'cd') actions.append(writableBox(t));
+        const ins = el('button', { className: 'btn btn-primary media-insert', textContent: 'Insert Image…' });
+        ins.addEventListener('click', () => insert(t));
+        actions.append(ins);
+      } else {
+        const mode = d.mounting ? 'inserting…' : d.read_only ? 'read-only' : 'writable';
+        body.append(el('div', { className: 'media-drive-state' },
+          el('span', { className: 'media-drive-image', textContent: d.image }),
+          el('span', { className: `media-tag ${d.read_only ? '' : 'warn'}`, textContent: mode })));
+        counters = el('div', { className: 'media-counters mono' });
+        body.append(counters);
+        const eject = el('button', { className: 'btn btn-secondary media-eject', textContent: d.mounting ? 'Cancel' : 'Eject' });
+        eject.addEventListener('click', () => act('DELETE', `/api/media/drives/${t}`));
+        actions.append(eject);
+      }
+      card = { key, node: el('div', { className: `media-drive${d ? ' loaded' : ''}` }, icon, body, actions), counters };
+      card.node.dataset.drive = t;
+      cards[t] = card;
+    }
+    if (card.counters && d && !d.mounting) card.counters.textContent = counterText(d);
+    return card.node;
+  }
+
+  function imageRow(img) {
+    const access = el('td');
+    if (img.kind === 'iso') {
+      access.textContent = 'read-only';
+      access.title = 'ISO images are always read-only';
+    } else {
+      const ro = el('input', { type: 'checkbox', checked: !img.read_only, disabled: Boolean(img.mapped_to) });
+      ro.title = img.mapped_to ? 'Eject it to change this' : 'Let the host write to this image';
+      ro.addEventListener('change', () => {
+        if (ro.checked && !window.confirm(`Let the host write to ${img.name}? It can change or erase everything in the image.`)) {
+          ro.checked = false;
+          return;
+        }
+        act('PATCH', `/api/media/images/${encodeURIComponent(img.id)}`, { read_only: !ro.checked, confirm_writable: ro.checked });
+      });
+      access.append(el('label', { className: 'media-check' }, ro, ' Writable'));
+    }
+
     const actions = el('td', { className: 'actions' });
     if (img.mapped_to) {
-      drive.textContent = TARGET_NAMES[img.mapped_to] || img.mapped_to;
+      actions.append(el('span', { className: 'empty', textContent: `in ${TARGET_NAMES[img.mapped_to] || img.mapped_to}` }));
     } else {
       const free = img.targets.filter((t) => !status.drives.some((d) => d.target === t));
-      const select = el('select');
-      for (const t of free) select.append(el('option', { value: t, textContent: TARGET_NAMES[t] }));
-      if (free.includes(chosen[img.id])) select.value = chosen[img.id];
-      select.addEventListener('change', () => { chosen[img.id] = select.value; });
-      const map = el('button', { textContent: 'Map', disabled: free.length === 0 });
-      map.addEventListener('click', () => act('POST', `/api/media/drives/${select.value}`, { image_id: img.id },
-        `Mapping ${img.name}… (the BMC can take a few seconds to free a drive)`));
-      if (free.length) drive.append(select, map);
-      else drive.append(el('span', { className: 'empty', textContent: 'drive in use' }));
-      const remove = el('button', { textContent: 'Remove' });
+      if (free.length) {
+        if (!free.includes(chosen[img.id])) chosen[img.id] = free[0];
+        const ins = el('button', { className: 'btn btn-secondary media-reinsert' });
+        const label = () => { ins.textContent = `Insert into ${TARGET_NAMES[chosen[img.id]]}`; };
+        label();
+        ins.addEventListener('click', () => act('POST', `/api/media/drives/${chosen[img.id]}`, { image_id: img.id },
+          `Inserting ${img.name}… (the BMC can take a few seconds to free a drive)`));
+        if (free.length > 1) {
+          const select = el('select', { title: 'Drive' });
+          for (const t of free) select.append(el('option', { value: t, textContent: TARGET_NAMES[t] }));
+          select.value = chosen[img.id];
+          select.addEventListener('change', () => { chosen[img.id] = select.value; label(); });
+          actions.append(select);
+        }
+        actions.append(ins);
+      } else {
+        actions.append(el('span', { className: 'empty', textContent: 'its drive is in use' }));
+      }
+      const remove = el('button', { className: 'btn btn-secondary', textContent: 'Remove', title: 'Take it off this list (the file is kept)' });
       remove.addEventListener('click', () => act('DELETE', `/api/media/images/${encodeURIComponent(img.id)}`));
       actions.append(remove);
     }
     const name = el('td', { textContent: img.name, title: img.path });
-    return el('tr', {}, name, el('td', { className: 'mono', textContent: formatBytes(img.size) }),
-      el('td', {}, ro), drive, actions);
-  }
-
-  function driveRow(target) {
-    const d = status.drives.find((x) => x.target === target);
-    const row = el('tr', {}, el('td', { textContent: TARGET_NAMES[target] }));
-    if (!d) {
-      row.append(el('td', { className: 'empty', textContent: 'empty' }), el('td'), el('td'), el('td'));
-      return row;
-    }
-    const eject = el('button', { textContent: d.mounting ? 'Cancel' : 'Eject' });
-    eject.addEventListener('click', () => act('DELETE', `/api/media/drives/${target}`));
-    row.append(
-      el('td', { textContent: d.mounting ? `${d.image} (mapping…)` : `${d.image}${d.read_only ? ' (read-only)' : ''}` }),
-      el('td', { className: 'mono', textContent: formatBytes(d.bytes_read) }),
-      el('td', { className: 'mono', textContent: formatBytes(d.bytes_written) }),
-      el('td', { className: 'actions' }, eject));
-    return row;
+    return el('tr', {}, name, el('td', { className: 'mono', textContent: formatBytes(img.size) }), access, actions);
   }
 
   function drawGraph(history) {
@@ -167,9 +251,16 @@ export function setupMedia(apiFetch) {
   function showRate(st, mapped) {
     statMedia.hidden = mapped === 0;
     if (mapped === 0) return;
-    const last = (st.history || [])[st.history.length - 1] || { read: 0, written: 0 };
-    statMedia.textContent = `VM ↓ ${formatBytes(last.read)}/s ↑ ${formatBytes(last.written)}/s`;
-    statMedia.classList.toggle('active', last.read + last.written > 0);
+    const history = st.history || [];
+    const last = history[history.length - 1] || { read: 0, written: 0 };
+    const busyNow = last.read + last.written > 0;
+    statMedia.textContent = busyNow
+      ? `VM ↓ ${formatBytes(last.read)}/s ↑ ${formatBytes(last.written)}/s`
+      : 'VM idle';
+    statMedia.title = busyNow
+      ? 'Virtual media transfer (read from / written to your images)'
+      : 'Virtual media is mapped; the host is not reading it right now';
+    statMedia.classList.toggle('active', busyNow);
   }
 
   function render(st) {
@@ -181,6 +272,7 @@ export function setupMedia(apiFetch) {
     if (mapped > 0 !== fastPoll) schedule();
     if (!modal.classList.contains('open')) return;
 
+    drivesBox.replaceChildren(...TARGETS.map(driveCard));
     // Rebuild the image rows only when they would change: rebuilding every poll would close an
     // open dropdown under the user.
     const key = JSON.stringify([st.images, st.drives.map((d) => d.target)]);
@@ -188,11 +280,10 @@ export function setupMedia(apiFetch) {
       imagesKey = key;
       imagesBody.replaceChildren(...(st.images.length
         ? st.images.map(imageRow)
-        : [el('tr', {}, el('td', { colSpan: 5, className: 'empty', textContent: 'No images yet: browse for an .iso or .img. Images are read-only unless you make them writable.' }))]));
+        : [el('tr', {}, el('td', { colSpan: 4, className: 'empty', textContent: 'Images you insert are listed here, to insert again with one click.' }))]));
     }
-    drivesBody.replaceChildren(...TARGETS.map(driveRow));
     drawGraph(st.history || []);
-    if (!busy) showError(st.error || '');
+    if (!busy) showError(actionError || st.error || '');
   }
 
   async function poll() {
@@ -223,7 +314,9 @@ export function setupMedia(apiFetch) {
 
   function open() {
     modal.classList.add('open');
+    actionError = '';
     imagesKey = ''; // rows are not kept up to date while closed
+    for (const t of TARGETS) delete cards[t];
     poll();
     schedule();
   }
@@ -241,9 +334,9 @@ export function setupMedia(apiFetch) {
     const input = document.getElementById('mediaPath');
     const path = input.value.trim();
     if (!path) return;
-    const writable = document.getElementById('mediaAddWritable').checked;
-    if (writable && !window.confirm('Add the image writable? The host can change or erase everything in it.')) return;
-    act('POST', '/api/media/images', { path, read_only: !writable, confirm_writable: writable })
+    const w = document.getElementById('mediaAddWritable').checked;
+    if (w && !window.confirm('Add the image writable? The host can change or erase everything in it.')) return;
+    act('POST', '/api/media/images', { path, read_only: !w, confirm_writable: w })
       .then(() => { if (errorLine.hidden) input.value = ''; });
   });
   const createForm = document.getElementById('mediaCreateForm');
@@ -255,25 +348,6 @@ export function setupMedia(apiFetch) {
     sizeSelect.hidden = fromFolder;
     folderInput.hidden = !fromFolder;
     browseFolder.hidden = !fromFolder;
-  });
-  // The desktop's own file chooser (xdg-desktop-portal): in a Flatpak, the way to reach files
-  // outside the sandbox. The server answers 501 when there is no portal.
-  const pickNative = document.getElementById('btnPickNative');
-  pickNative.hidden = false;
-  pickNative.addEventListener('click', async () => {
-    showError('Choose a file in the window that opened on your desktop…');
-    try {
-      const res = await call('POST', '/api/media/pick', { directory: false });
-      if (res.paths && res.paths.length) document.getElementById('mediaPath').value = res.paths[0];
-      showError('');
-    } catch (e) {
-      if (/no desktop file chooser/.test(e.message)) pickNative.hidden = true;
-      showError(e.message);
-    }
-  });
-  document.getElementById('btnBrowseImage').addEventListener('click', async () => {
-    const path = await pick('file', 'Choose an image (.iso or .img)');
-    if (path) document.getElementById('mediaPath').value = path;
   });
   browseFolder.addEventListener('click', async () => {
     const path = await pick('dir', 'Choose the folder to copy into the image');
@@ -291,7 +365,7 @@ export function setupMedia(apiFetch) {
     const body = { path, label: document.getElementById('mediaCreateLabel').value.trim() };
     if (createForm.elements.createKind.value === 'folder') body.folder = folderInput.value.trim();
     else body.size = Number(sizeSelect.value);
-    act('POST', '/api/media/create', body, 'Creating image…', 'Image created and added to the list.');
+    act('POST', '/api/media/create', body, 'Creating image…', 'Image created: insert it from Recent images.');
   });
   document.getElementById('btnUsbReset').addEventListener('click', () => {
     act('POST', '/api/media/usb-reset', undefined, 'Resetting USB…',

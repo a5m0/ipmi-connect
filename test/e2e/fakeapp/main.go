@@ -19,6 +19,7 @@ import (
 	"github.com/a5m0/ipmi-connect/internal/config"
 	"github.com/a5m0/ipmi-connect/internal/session"
 	"github.com/a5m0/ipmi-connect/internal/trust"
+	"github.com/a5m0/ipmi-connect/internal/vmedia"
 	"github.com/a5m0/ipmi-connect/internal/web"
 )
 
@@ -50,8 +51,9 @@ func useDocsValues() {
 }
 
 type console struct {
-	mu   sync.Mutex
-	keys int
+	mu              sync.Mutex
+	keys            int
+	*vmedia.Manager // real virtual media over a fake session (media.go)
 }
 
 func (c *console) SendPointerEvent(byte, uint16, uint16) error { return nil }
@@ -109,11 +111,11 @@ func (s *sessions) Connect(ctx context.Context, req session.Request) (session.St
 	if !strings.EqualFold(req.TrustFingerprints[0], fakeFingerprint) || req.Password != "test-password" {
 		return session.Status{}, fmt.Errorf("unexpected request")
 	}
-	c := &console{}
+	c := &console{Manager: vmedia.NewManager(openFakeMedia)}
 	s.server.Attach(c, bmc.SessionState{Host: "192.0.2.10", TargetType: bmc.TargetSupermicro, Model: "Fake", Connected: true, PowerState: "ON"})
 	runCtx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
-	s.phase, s.stop = session.PhaseConnected, cancel
+	s.phase, s.stop = session.PhaseConnected, func() { cancel(); c.Close() }
 	s.mu.Unlock()
 	screen := loadScreen()
 	go func() {
@@ -128,6 +130,8 @@ func (s *sessions) Connect(ctx context.Context, req session.Request) (session.St
 		}
 		pix := make([]byte, w*h*4)
 		for n := 0; ; n++ {
+			// A round trip that changes, so the stats bar visibly updates.
+			s.server.SetPing(time.Duration(1000+n/5%5*1000) * time.Microsecond) // changes each second
 			for i := 0; i < len(pix); i += 4 {
 				pix[i], pix[i+1], pix[i+2], pix[i+3] = 200, byte(n), 40, 255
 				if fps > 0 { // a moving gradient, so every tile changes every frame
